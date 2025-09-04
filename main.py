@@ -1,5 +1,5 @@
 import sys
-from PyQt6.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication
 from editor_window import EditorWindow
 
 if __name__ == "__main__":
