@@ -15,22 +15,30 @@ import re
 
 
 def evaluate_expression(expr, L_val, W_val):
+    """
+    Вычисляет выражение: L, W, формулы, запятые, отрицания.
+    """
     if not isinstance(expr, str):
         return 0.0
     expr = expr.strip()
     if expr == "":
         return 0.0
+
     expr = expr.replace(',', '.')
     try:
         num = float(expr)
         return num
     except:
         pass
+
     expr = expr.replace("L", str(L_val)).replace("W", str(W_val))
+
     def replace_neg(match):
         return " - " + match.group(1)
+
     expr = re.sub(r"-\((\d+\.?\d*)\)", replace_neg, expr)
     expr = re.sub(r"[^\d\.\+\-\*\/\(\) ]", "", expr)
+
     try:
         return float(eval(expr))
     except:
@@ -55,6 +63,7 @@ class PlotWidget(FigureCanvas):
         value = value.replace(',', '.').strip()
         if value == "":
             return 0.0
+
         try:
             num = float(value)
             if num < 0:
@@ -62,6 +71,7 @@ class PlotWidget(FigureCanvas):
             return num
         except:
             pass
+
         expr = value.replace("L", str(L_val)).replace("W", str(W_val))
         expr = re.sub(r"-\((\d+\.?\d*)\)", r" - \1", expr)
         expr = re.sub(r"[^\d\.\+\-\*\/\(\) ]", "", expr)
@@ -73,15 +83,14 @@ class PlotWidget(FigureCanvas):
     def draw_operations(self, operations, panel_length, panel_width):
         self.clear_plot()
 
-        # Ось X: справа налево (L → 0), Y: сверху вниз (0 → W)
-        self.ax.set_xlim(panel_length, 0)
-        self.ax.set_ylim(0, panel_width)
+        # Расширяем область, чтобы торцевые были видны
+        margin = 50
+        self.ax.set_xlim(panel_length + margin, -margin)  # X: справа налево + запас
+        self.ax.set_ylim(-margin, panel_width + margin)   # Y: сверху вниз + запас
 
         self.ax.set_aspect('equal', adjustable='box')
-        self.ax.grid(True, linestyle='--', alpha=0.5)
-        self.ax.set_xlabel("X, мм")
-        self.ax.set_ylabel("Y, мм")
         self.ax.set_title("Чертёж детали")
+        self.ax.axis('off')  # Убираем оси, сетку, метки
 
         # Контур детали — от (0,0) до (L, W)
         rectangle = plt.Rectangle(
@@ -109,8 +118,8 @@ class PlotWidget(FigureCanvas):
                     begin_y = self.parse_coord(op.get("BeginY", "0"), L_val, W_val, is_y=True)
                     end_x = self.parse_coord(op.get("EndX", "0"), L_val, W_val)
                     end_y = self.parse_coord(op.get("EndY", "0"), L_val, W_val, is_y=True)
-                    self.ax.plot([begin_x, end_x], [begin_y, end_y], color='blue', linewidth=2, zorder=2)
-                    types_in_use.add(("Фрезеровка", 'blue'))
+                    self.ax.plot([begin_x, end_x], [begin_y, end_y], color='brown', linewidth=2, zorder=2)
+                    types_in_use.add(("Фрезеровка", 'brown'))
 
                 elif type_name == "Horizontal Hole":
                     x_val = self.parse_coord(op.get("X1", "0"), L_val, W_val)
@@ -119,38 +128,73 @@ class PlotWidget(FigureCanvas):
                         depth_val = float(str(op.get("Depth", "0")).replace(',', '.'))
                     except:
                         depth_val = 0.0
+                    try:
+                        diameter_val = float(str(op.get("Diameter", "5")).replace(',', '.'))
+                    except:
+                        diameter_val = 5.0
 
-                    # Правый торец (X ≈ 0)
+                    # Правый торец (X ≈ 0) → влево (внутрь)
                     if x_val < 10:
-                        end_x = x_val - depth_val
-                        end_y = y_val
-                        self.ax.annotate('', xy=(end_x, end_y), xytext=(x_val, y_val),
-                                        arrowprops=dict(arrowstyle='->', color='blue', lw=1.5))
-                    # Левый торец (X ≈ L)
+                        print(f"Правый торец: X={x_val}, рисуем от {x_val - depth_val} до {x_val}")
+                        rect = plt.Rectangle(
+                            (x_val, y_val - diameter_val / 2),
+                            depth_val,
+                            diameter_val,
+                            linewidth=0,
+                            edgecolor='none',
+                            facecolor='blue',
+                            alpha=0.7,
+                            zorder=2
+                        )
+                        self.ax.add_patch(rect)
+                        types_in_use.add(("Торцевое", 'blue'))
+                    # Левый торец (X ≈ L) → влево (внутрь)
                     elif x_val > L_val - 10:
-                        end_x = x_val + depth_val
-                        end_y = y_val
-                        self.ax.annotate('', xy=(end_x, end_y), xytext=(x_val, y_val),
-                                        arrowprops=dict(arrowstyle='<-', color='blue', lw=1.5))
-                    # Верхний торец (Y ≈ 0)
+                        print(f"Левый торец: X={x_val}, L={L_val}, рисуем от {x_val - depth_val} до {x_val}")
+                        rect = plt.Rectangle(
+                            (x_val - depth_val, y_val - diameter_val / 2),
+                            depth_val,
+                            diameter_val,
+                            linewidth=0,
+                            edgecolor='none',
+                            facecolor='blue',
+                            alpha=0.7,
+                            zorder=2
+                        )
+                        self.ax.add_patch(rect)
+                        types_in_use.add(("Торцевое", 'blue'))
+                    # Верхний торец (Y ≈ 0) → вниз (внутрь)
                     elif y_val < 10:
-                        end_y = y_val - depth_val
-                        end_x = x_val
-                        self.ax.annotate('', xy=(end_x, end_y), xytext=(x_val, y_val),
-                                        arrowprops=dict(arrowstyle='->', color='blue', lw=1.5))
-                    # Нижний торец (Y ≈ W)
+                        rect = plt.Rectangle(
+                            (x_val - diameter_val / 2, y_val),
+                            diameter_val,
+                            depth_val,
+                            linewidth=0,
+                            edgecolor='none',
+                            facecolor='blue',
+                            alpha=0.7,
+                            zorder=2
+                        )
+                        self.ax.add_patch(rect)
+                        types_in_use.add(("Торцевое", 'blue'))
+                    # Нижний торец (Y ≈ W) → вверх (внутрь)
                     elif y_val > W_val - 10:
-                        end_y = y_val + depth_val
-                        end_x = x_val
-                        self.ax.annotate('', xy=(end_x, end_y), xytext=(x_val, y_val),
-                                        arrowprops=dict(arrowstyle='<-', color='blue', lw=1.5))
+                        rect = plt.Rectangle(
+                            (x_val - diameter_val / 2, y_val - depth_val),
+                            diameter_val,
+                            depth_val,
+                            linewidth=0,
+                            edgecolor='none',
+                            facecolor='blue',
+                            alpha=0.7,
+                            zorder=2
+                        )
+                        self.ax.add_patch(rect)
+                        types_in_use.add(("Торцевое", 'blue'))
                     else:
                         self.ax.plot(x_val, y_val, 'o', color='blue', markersize=4)
                         types_in_use.add(("Торцевое", 'blue'))
                         continue
-
-                    self.ax.plot(x_val, y_val, 'o', color='blue', markersize=4)
-                    types_in_use.add(("Торцевое", 'blue'))
 
                 else:
                     x_val = self.parse_coord(op.get("X1", "0"), L_val, W_val)
@@ -185,6 +229,7 @@ class PlotWidget(FigureCanvas):
                 print(f"Ошибка при отрисовке: {e}")
                 continue
 
+        # Сохраняем типы для легенды
         self.types_in_use = sorted(types_in_use, key=lambda x: x[0])
         self.draw()
 
@@ -201,8 +246,9 @@ class EditorWindow(QMainWindow):
 
     def init_ui(self):
         central_widget = QWidget()
-        main_layout = QHBoxLayout()
+        main_layout = QHBoxLayout()  # Таблица слева, чертёж справа
 
+        # Левая часть — таблица и управление
         left_widget = QWidget()
         left_layout = QVBoxLayout()
         form_layout = QHBoxLayout()
@@ -243,12 +289,14 @@ class EditorWindow(QMainWindow):
         left_layout.addLayout(button_layout)
         left_widget.setLayout(left_layout)
 
+        # Правая часть — чертёж и легенда под ним
         right_widget = QWidget()
         right_layout = QVBoxLayout()
 
         self.plot = PlotWidget(self, width=6, height=4, dpi=100)
         right_layout.addWidget(self.plot)
 
+        # Легенда — под чертежом, в столбик
         self.legend_widget = QWidget()
         self.legend_layout = QVBoxLayout()
         self.legend_widget.setLayout(self.legend_layout)
@@ -257,6 +305,7 @@ class EditorWindow(QMainWindow):
 
         right_widget.setLayout(right_layout)
 
+        # Объединяем
         main_layout.addWidget(left_widget, stretch=1)
         main_layout.addWidget(right_widget, stretch=2)
 
@@ -330,8 +379,11 @@ class EditorWindow(QMainWindow):
             self.plot.draw()
 
     def update_legend(self):
+        # Очищаем легенду
         for i in reversed(range(self.legend_layout.count())):
             self.legend_layout.itemAt(i).widget().setParent(None)
+
+        # Добавляем элементы легенды
         if hasattr(self.plot, 'types_in_use'):
             for label, color in self.plot.types_in_use:
                 label_widget = QLabel(f" ■ {label}")
