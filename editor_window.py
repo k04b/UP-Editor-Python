@@ -15,31 +15,39 @@ import re
 
 
 def evaluate_expression(expr, L_val, W_val):
-    """
-    Вычисляет выражение: L, W, формулы, запятые, отрицания.
-    Поддерживает: L-100, -(50), L-(100), W/2, -50.5
-    """
     if not isinstance(expr, str):
         return 0.0
     expr = expr.strip()
     if expr == "":
         return 0.0
-
     expr = expr.replace(',', '.')
-
-    # Обработка отрицаний в скобках: -(50) → -50
     expr = re.sub(r"-\s*\(([\d.]+)\)", r"- \1", expr)
-
-    # Замена L и W
     expr = expr.replace("L", str(L_val)).replace("W", str(W_val))
-
-    # Удаляем всё, кроме чисел, операций и пробелов
     expr = re.sub(r"[^\d\.\+\-\*\/\(\) ]", "", expr)
-
     try:
         return float(eval(expr))
     except:
         return 0.0
+
+
+# --- Отображаемые имена ---
+def display_type(type_name):
+    return {
+        "Vertical Hole": "Верхняя плоскость",
+        "Back Vertical Hole": "Нижняя плоскость",
+        "Horizontal Hole": "Торцевое",
+        "Line": "Линейная фрезеровка"
+    }.get(type_name, type_name)
+
+
+def internal_type(display_name):
+    return {
+        "Верхняя плоскость": "Vertical Hole",
+        "Нижняя плоскость": "Back Vertical Hole",
+        "Торцевое": "Horizontal Hole",
+        "Линейная фрезеровка": "Line"
+    }.get(display_name, display_name)
+# ---------------------------
 
 
 class PlotWidget(FigureCanvas):
@@ -62,28 +70,22 @@ class PlotWidget(FigureCanvas):
         self.operation_patches = []
 
     def clear_highlight(self):
-        """Удаляет текущую подсветку"""
         if hasattr(self, 'highlight_patch') and self.highlight_patch:
             self.highlight_patch.remove()
             self.highlight_patch = None
             self.draw()
 
     def highlight_element(self, idx):
-        print(f"[DEBUG] highlight_element вызван для индекса {idx}")
         try:
             self.clear_highlight()
-
             for obj, i in self.operation_patches:
                 if i == idx:
                     if isinstance(obj, plt.Circle):
                         center = obj.center
-                        radius = obj.radius + 4  # Заметно больше
+                        radius = obj.radius + 4
                         self.highlight_patch = plt.Circle(
                             center, radius,
-                            color='dimgray',           # Яркий цвет
-                            fill=False,
-                            linewidth=4,           # Толстая линия
-                            zorder=30              # Поверх всех
+                            color='red', fill=False, linewidth=4, zorder=30
                         )
                         self.ax.add_patch(self.highlight_patch)
                     elif isinstance(obj, plt.Rectangle):
@@ -91,23 +93,17 @@ class PlotWidget(FigureCanvas):
                         w, h = obj.get_width(), obj.get_height()
                         self.highlight_patch = plt.Rectangle(
                             (xmin - 2, ymin - 2), w + 4, h + 4,
-                            edgecolor='dimgray',
-                            facecolor='none',
-                            linewidth=4,
-                            zorder=30
+                            edgecolor='red', facecolor='none', linewidth=4, zorder=30
                         )
                         self.ax.add_patch(self.highlight_patch)
                     elif hasattr(obj, 'get_xydata'):
                         xy = obj.get_xydata()
                         self.highlight_patch, = self.ax.plot(
                             xy[:, 0], xy[:, 1],
-                            color='dimgray',
-                            linewidth=5,
-                            zorder=30
+                            color='red', linewidth=5, zorder=30
                         )
                     break
-
-            self.draw()  # Убедимся, что график обновился
+            self.draw()
         except Exception as e:
             print(f"[ERROR] Ошибка в highlight_element: {e}")
 
@@ -117,41 +113,29 @@ class PlotWidget(FigureCanvas):
         value = value.strip()
         if value == "":
             return 0.0
-
-        # Если значение отрицательное — преобразуем в формулу от L или W
         if value.startswith('-') and value[1:].replace('.', '', 1).isdigit():
             try:
                 num = float(value)
                 if is_y:
-                    return W_val + num  # W - |num|
+                    return W_val + num
                 else:
-                    return L_val + num  # L - |num|
+                    return L_val + num
             except:
                 pass
-
-        # Иначе — парсим как формулу
         return evaluate_expression(value, L_val, W_val)
 
     def draw_operations(self, operations, panel_length, panel_width):
         self.clear_plot()
-
         margin = 50
         self.ax.set_xlim(panel_length + margin, -margin)
         self.ax.set_ylim(-margin, panel_width + margin)
-
         self.ax.set_aspect('equal', adjustable='box')
         self.ax.set_title("Чертёж детали")
         self.ax.axis('off')
 
         rectangle = plt.Rectangle(
-            (0, 0),
-            panel_length,
-            panel_width,
-            linewidth=2,
-            edgecolor='black',
-            facecolor='lightblue',
-            alpha=0.5,
-            zorder=1
+            (0, 0), panel_length, panel_width,
+            linewidth=2, edgecolor='black', facecolor='lightblue', alpha=0.5, zorder=1
         )
         self.ax.add_patch(rectangle)
 
@@ -185,58 +169,26 @@ class PlotWidget(FigureCanvas):
                         diameter_val = 5.0
 
                     if x_val < 10:
-                        rect = plt.Rectangle(
-                            (x_val, y_val - diameter_val / 2),
-                            depth_val,
-                            diameter_val,
-                            linewidth=0,
-                            edgecolor='none',
-                            facecolor='blue',
-                            alpha=0.7,
-                            zorder=2
-                        )
+                        rect = plt.Rectangle((x_val, y_val - diameter_val / 2), depth_val, diameter_val,
+                                           facecolor='blue', alpha=0.7, zorder=2)
                         self.ax.add_patch(rect)
                         self.operation_patches.append((rect, idx))
                         types_in_use.add(("Торцевое", 'blue'))
                     elif x_val > L_val - 10:
-                        rect = plt.Rectangle(
-                            (x_val - depth_val, y_val - diameter_val / 2),
-                            depth_val,
-                            diameter_val,
-                            linewidth=0,
-                            edgecolor='none',
-                            facecolor='blue',
-                            alpha=0.7,
-                            zorder=2
-                        )
+                        rect = plt.Rectangle((x_val - depth_val, y_val - diameter_val / 2), depth_val, diameter_val,
+                                           facecolor='blue', alpha=0.7, zorder=2)
                         self.ax.add_patch(rect)
                         self.operation_patches.append((rect, idx))
                         types_in_use.add(("Торцевое", 'blue'))
                     elif y_val < 10:
-                        rect = plt.Rectangle(
-                            (x_val - diameter_val / 2, y_val),
-                            diameter_val,
-                            depth_val,
-                            linewidth=0,
-                            edgecolor='none',
-                            facecolor='blue',
-                            alpha=0.7,
-                            zorder=2
-                        )
+                        rect = plt.Rectangle((x_val - diameter_val / 2, y_val), diameter_val, depth_val,
+                                           facecolor='blue', alpha=0.7, zorder=2)
                         self.ax.add_patch(rect)
                         self.operation_patches.append((rect, idx))
                         types_in_use.add(("Торцевое", 'blue'))
                     elif y_val > W_val - 10:
-                        rect = plt.Rectangle(
-                            (x_val - diameter_val / 2, y_val - depth_val),
-                            diameter_val,
-                            depth_val,
-                            linewidth=0,
-                            edgecolor='none',
-                            facecolor='blue',
-                            alpha=0.7,
-                            zorder=2
-                        )
+                        rect = plt.Rectangle((x_val - diameter_val / 2, y_val - depth_val), diameter_val, depth_val,
+                                           facecolor='blue', alpha=0.7, zorder=2)
                         self.ax.add_patch(rect)
                         self.operation_patches.append((rect, idx))
                         types_in_use.add(("Торцевое", 'blue'))
@@ -249,7 +201,6 @@ class PlotWidget(FigureCanvas):
                     x_val = self.parse_coord(op.get("X1", "0"), L_val, W_val)
                     y_val = self.parse_coord(op.get("Y1", "0"), L_val, W_val, is_y=True)
                     diameter = float(op.get("Diameter", "0") or 0)
-
                     try:
                         depth_val = float(str(op.get("Depth", "0")).replace(',', '.'))
                     except:
@@ -280,7 +231,6 @@ class PlotWidget(FigureCanvas):
                 print(f"Ошибка при отрисовке: {e}")
                 continue
 
-        print(f"[DEBUG] operation_patches заполнен: {len(self.operation_patches)} элементов")
         self.types_in_use = sorted(types_in_use, key=lambda x: x[0])
         self.draw()
 
@@ -293,9 +243,7 @@ class PlotWidget(FigureCanvas):
                 dx = x_click - obj.center[0]
                 dy = y_click - obj.center[1]
                 if dx*dx + dy*dy <= (obj.radius + 10)**2:
-                    self.main_window.table.selectRow(idx)
-                    self.highlight_element(idx)
-                    self.main_window.table.scrollTo(self.main_window.table.model().index(idx, 0))
+                    self.select_and_highlight_row(idx)
                     break
             elif isinstance(obj, plt.Rectangle):
                 xmin, ymin = obj.get_xy()
@@ -303,9 +251,7 @@ class PlotWidget(FigureCanvas):
                 ymax = ymin + obj.get_height()
                 margin_x, margin_y = 10, 15
                 if xmin - margin_x <= x_click <= xmax + margin_x and ymin - margin_y <= y_click <= ymax + margin_y:
-                    self.main_window.table.selectRow(idx)
-                    self.highlight_element(idx)
-                    self.main_window.table.scrollTo(self.main_window.table.model().index(idx, 0))
+                    self.select_and_highlight_row(idx)
                     break
             elif hasattr(obj, 'get_xydata'):
                 xy = obj.get_xydata()
@@ -328,10 +274,14 @@ class PlotWidget(FigureCanvas):
                         yy = y1 + param * D
                     dist = ((x_click - xx)**2 + (y_click - yy)**2)**0.5
                     if dist < 10:
-                        self.main_window.table.selectRow(idx)
-                        self.highlight_element(idx)
-                        self.main_window.table.scrollTo(self.main_window.table.model().index(idx, 0))
+                        self.select_and_highlight_row(idx)
                         break
+
+    def select_and_highlight_row(self, idx):
+        table = self.main_window.table
+        table.selectRow(idx)
+        self.highlight_element(idx)
+        self.main_window.table.scrollTo(self.main_window.table.model().index(idx, 0))
 
     def on_hover(self, event):
         if event.inaxes != self.ax:
@@ -416,19 +366,23 @@ class EditorWindow(QMainWindow):
         form_layout.addWidget(self.thickness_input)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Тип", "X", "Y", "Диаметр", "Глубина"])
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(["Тип", "X1", "X2", "Y1", "Y2", "Диаметр", "Глубина"])
 
-        # Разрешаем редактирование
+        self.table.setColumnWidth(0, 90)  # Тип — шире
+        self.table.setColumnWidth(1, 50)   # X1
+        self.table.setColumnWidth(2, 50)   # X2
+        self.table.setColumnWidth(3, 50)   # Y1
+        self.table.setColumnWidth(4, 50)   # Y2
+        self.table.setColumnWidth(5, 40)   # Диаметр
+        self.table.setColumnWidth(6, 40)   # Глубина
+
+
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
         self.table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
         self.table.cellChanged.connect(self.on_table_edit)
-
-        # Подключаем изменение выбора строки
         self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
-
-        # Выделять всю строку при клике на любую ячейку
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)       
 
         button_layout = QHBoxLayout()
         btn_open = QPushButton("Открыть XML")
@@ -450,7 +404,6 @@ class EditorWindow(QMainWindow):
 
         right_widget = QWidget()
         right_layout = QVBoxLayout()
-
         self.plot = PlotWidget(self, width=6, height=4, dpi=100)
         right_layout.addWidget(self.plot)
 
@@ -474,26 +427,24 @@ class EditorWindow(QMainWindow):
             return
         self.file_path = file_path
 
-        # Отключаем только таблицу
         self.table.blockSignals(True)
+        self.plot.blockSignals(True)
 
-        # Загружаем данные
         self.panel_data, self.cad_operations = xml_handler.load_xml(file_path)
 
-        # Обновляем поля
         self.name_input.setText(self.panel_data.get("PanelName", ""))
         self.length_input.setText(str(self.panel_data.get("PanelLength", "")).replace('.', ','))
         self.width_input.setText(str(self.panel_data.get("PanelWidth", "")).replace('.', ','))
         self.thickness_input.setText(str(self.panel_data.get("PanelThickness", "")).replace('.', ','))
 
-        # Обновляем таблицу и чертёж
         self.load_table()
         self.refresh_plot()
         self.update_legend()
 
-        # Включаем таблицу
         self.table.blockSignals(False)
+        self.plot.blockSignals(False)
 
+        self.setWindowTitle(f"Редактор УП — {self.file_path}")
         QMessageBox.information(self, "Готово", "Файл загружен!")
 
     def load_table(self):
@@ -501,38 +452,46 @@ class EditorWindow(QMainWindow):
         for op in self.cad_operations:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(op.get("TypeName", "")))
-            if op["TypeName"] == "Line":
-                x_val = f"{op.get('BeginX', '')};{op.get('EndX', '')}"
-                y_val = f"{op.get('BeginY', '')};{op.get('EndY', '')}"
+            type_name = op.get("TypeName", "")
+            display_name = display_type(type_name)
+            self.table.setItem(row, 0, QTableWidgetItem(display_name))
+
+            if type_name == "Line":
+                x1 = op.get("BeginX", "0")
+                x2 = op.get("EndX", "0")
+                y1 = op.get("BeginY", "0")
+                y2 = op.get("EndY", "0")
+                self.table.setItem(row, 1, QTableWidgetItem(x1))
+                self.table.setItem(row, 2, QTableWidgetItem(x2))
+                self.table.setItem(row, 3, QTableWidgetItem(y1))
+                self.table.setItem(row, 4, QTableWidgetItem(y2))
             else:
-                x_val = op.get("X1", "")
-                y_val = op.get("Y1", "")
-            self.table.setItem(row, 1, QTableWidgetItem(x_val))
-            self.table.setItem(row, 2, QTableWidgetItem(y_val))
-            self.table.setItem(row, 3, QTableWidgetItem(op.get("Diameter", op.get("Width", ""))))
-            self.table.setItem(row, 4, QTableWidgetItem(op.get("Depth", "")))
+                x = op.get("X1", "0")
+                y = op.get("Y1", "0")
+                self.table.setItem(row, 1, QTableWidgetItem(x))
+                self.table.setItem(row, 2, QTableWidgetItem(""))  # X2 пусто
+                self.table.setItem(row, 3, QTableWidgetItem(y))
+                self.table.setItem(row, 4, QTableWidgetItem(""))  # Y2 пусто
+
+            self.table.setItem(row, 5, QTableWidgetItem(op.get("Diameter", op.get("Width", ""))))
+            self.table.setItem(row, 6, QTableWidgetItem(op.get("Depth", "")))
 
     def on_table_edit(self, row, col):
         try:
-            keys = ["TypeName", "X1", "Y1", "Diameter", "Depth"]
-            key = keys[col]
+            key = ["TypeName", "X1", "X2", "Y1", "Y2", "Diameter", "Depth"][col]
             item = self.table.item(row, col)
             if item is None:
                 return
             value = item.text().strip()
 
-            # Автоматическое преобразование отрицательных чисел
-            if key in ["X1", "Y1"]:
-                if value.startswith('-') and value[1:].replace('.', '', 1).isdigit():
-                    try:
-                        num = abs(float(value))
-                        formula = f"L-{num}" if key == "X1" else f"W-{num}"
-                        item.setText(formula)
-                        value = formula
-                    except:
-                        pass
-            elif key in ["Diameter", "Depth"]:
+            if key == "TypeName":
+                internal_value = internal_type(value)
+                self.cad_operations[row]["TypeName"] = internal_value
+                self.load_table()
+                self.refresh_plot()
+                return
+
+            if key in ["X1", "X2", "Y1", "Y2", "Diameter", "Depth"]:
                 try:
                     num = float(value.replace(',', '.'))
                     value = f"{num:.1f}"
@@ -540,27 +499,81 @@ class EditorWindow(QMainWindow):
                 except:
                     value = "0.0"
 
-            self.cad_operations[row][key] = value
+            op = self.cad_operations[row]
+            type_name = op["TypeName"]
+
+            if type_name == "Line":
+                if key == "X1": op["BeginX"] = value
+                elif key == "X2": op["EndX"] = value
+                elif key == "Y1": op["BeginY"] = value
+                elif key == "Y2": op["EndY"] = value
+                elif key == "Diameter": op["Width"] = value
+                elif key == "Depth": op["Depth"] = value
+            else:
+                if key == "X1": op["X1"] = value
+                elif key == "Y1": op["Y1"] = value
+                elif key == "Diameter": op["Diameter"] = value
+                elif key == "Depth": op["Depth"] = value
+
             self.refresh_plot()
 
         except Exception as e:
             print(f"Ошибка при редактировании: {e}")
 
     def save_xml(self):
-        if not self.file_path:
+        self.save_xml_as()
+
+    def save_xml_as(self):
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Сохранить XML как...", "", "XML Files (*.xml)"
+        )
+        if not file_path:
             return
+
+        if not file_path.lower().endswith('.xml'):
+            file_path += '.xml'
+
         updated_cad = []
         for row in range(self.table.rowCount()):
-            op = {
-                "TypeName": self.table.item(row, 0).text() if self.table.item(row, 0) else "",
-                "X1": self.table.item(row, 1).text() if self.table.item(row, 1) else "",
-                "Y1": self.table.item(row, 2).text() if self.table.item(row, 2) else "",
-                "Diameter": self.table.item(row, 3).text() if self.table.item(row, 3) else "",
-                "Depth": self.table.item(row, 4).text() if self.table.item(row, 4) else ""
-            }
+            op = self.cad_operations[row].copy()  # Берём оригинальную операцию
+            type_name = op.get("TypeName", "")
+
+            if type_name == "Line":
+                # Обновляем из таблицы
+                begin_x_item = self.table.item(row, 1)
+                begin_y_item = self.table.item(row, 3)
+                end_x_item = self.table.item(row, 2)
+                end_y_item = self.table.item(row, 4)
+                width_item = self.table.item(row, 5)
+                depth_item = self.table.item(row, 6)
+
+                op["BeginX"] = begin_x_item.text().strip() if begin_x_item and begin_x_item.text().strip() else "0"
+                op["BeginY"] = begin_y_item.text().strip() if begin_y_item and begin_y_item.text().strip() else "0"
+                op["EndX"] = end_x_item.text().strip() if end_x_item and end_x_item.text().strip() else "0"
+                op["EndY"] = end_y_item.text().strip() if end_y_item and end_y_item.text().strip() else "0"
+                op["Width"] = width_item.text().strip() if width_item and width_item.text().strip() else "0"
+                op["Depth"] = depth_item.text().strip() if depth_item and depth_item.text().strip() else "0"
+            else:
+                # Для отверстий
+                x1_item = self.table.item(row, 1)
+                y1_item = self.table.item(row, 3)
+                diam_item = self.table.item(row, 5)
+                depth_item = self.table.item(row, 6)
+
+                op["X1"] = x1_item.text().strip() if x1_item and x1_item.text().strip() else "0"
+                op["Y1"] = y1_item.text().strip() if y1_item and y1_item.text().strip() else "0"
+                op["Diameter"] = diam_item.text().strip() if diam_item and diam_item.text().strip() else "0"
+                op["Depth"] = depth_item.text().strip() if depth_item and depth_item.text().strip() else "0"
+
             updated_cad.append(op)
-        xml_handler.save_xml(self.file_path, self.panel_data, updated_cad)
-        QMessageBox.information(self, "Сохранено", "Файл сохранён в формате станка!")
+
+        try:
+            xml_handler.save_xml(file_path, self.panel_data, updated_cad)
+            self.file_path = file_path
+            self.setWindowTitle(f"Редактор УП — {file_path}")
+            QMessageBox.information(self, "Сохранено", "Файл успешно сохранён!")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
 
     def refresh_plot(self):
         try:
@@ -590,17 +603,10 @@ class EditorWindow(QMainWindow):
                 self.legend_layout.addWidget(label_widget)
 
     def on_selection_changed(self, selected, deselected):
-        print("[DEBUG] on_selection_changed вызван")
         indexes = self.table.selectionModel().selectedRows()
         if indexes:
             row = indexes[0].row()
-            print(f"[DEBUG] Выбрана строка: {row}")
-            if hasattr(self.plot, 'operation_patches') and self.plot.operation_patches:
-                self.plot.highlight_element(row)
-            else:
-                print("[DEBUG] operation_patches пуст или не инициализирован")
-        else:
-            self.plot.clear_highlight()
+            self.plot.highlight_element(row)
 
 
 if __name__ == "__main__":
