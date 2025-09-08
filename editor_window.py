@@ -17,6 +17,7 @@ import re
 def evaluate_expression(expr, L_val, W_val):
     """
     Вычисляет выражение: L, W, формулы, запятые, отрицания.
+    Поддерживает: L-100, -(50), L-(100), W/2, -50.5
     """
     if not isinstance(expr, str):
         return 0.0
@@ -25,18 +26,14 @@ def evaluate_expression(expr, L_val, W_val):
         return 0.0
 
     expr = expr.replace(',', '.')
-    try:
-        num = float(expr)
-        return num
-    except:
-        pass
 
+    # Обработка отрицаний в скобках: -(50) → -50
+    expr = re.sub(r"-\s*\(([\d.]+)\)", r"- \1", expr)
+
+    # Замена L и W
     expr = expr.replace("L", str(L_val)).replace("W", str(W_val))
 
-    def replace_neg(match):
-        return " - " + match.group(1)
-
-    expr = re.sub(r"-\((\d+\.?\d*)\)", replace_neg, expr)
+    # Удаляем всё, кроме чисел, операций и пробелов
     expr = re.sub(r"[^\d\.\+\-\*\/\(\) ]", "", expr)
 
     try:
@@ -55,7 +52,6 @@ class PlotWidget(FigureCanvas):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.updateGeometry()
 
-        # Подключаем события
         self.fig.canvas.mpl_connect('button_press_event', self.on_click)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_hover)
 
@@ -65,28 +61,76 @@ class PlotWidget(FigureCanvas):
         self.ax.clear()
         self.operation_patches = []
 
+    def clear_highlight(self):
+        """Удаляет текущую подсветку"""
+        if hasattr(self, 'highlight_patch') and self.highlight_patch:
+            self.highlight_patch.remove()
+            self.highlight_patch = None
+            self.draw()
+
+    def highlight_element(self, idx):
+        print(f"[DEBUG] highlight_element вызван для индекса {idx}")
+        try:
+            self.clear_highlight()
+
+            for obj, i in self.operation_patches:
+                if i == idx:
+                    if isinstance(obj, plt.Circle):
+                        center = obj.center
+                        radius = obj.radius + 4  # Заметно больше
+                        self.highlight_patch = plt.Circle(
+                            center, radius,
+                            color='dimgray',           # Яркий цвет
+                            fill=False,
+                            linewidth=4,           # Толстая линия
+                            zorder=30              # Поверх всех
+                        )
+                        self.ax.add_patch(self.highlight_patch)
+                    elif isinstance(obj, plt.Rectangle):
+                        xmin, ymin = obj.get_xy()
+                        w, h = obj.get_width(), obj.get_height()
+                        self.highlight_patch = plt.Rectangle(
+                            (xmin - 2, ymin - 2), w + 4, h + 4,
+                            edgecolor='dimgray',
+                            facecolor='none',
+                            linewidth=4,
+                            zorder=30
+                        )
+                        self.ax.add_patch(self.highlight_patch)
+                    elif hasattr(obj, 'get_xydata'):
+                        xy = obj.get_xydata()
+                        self.highlight_patch, = self.ax.plot(
+                            xy[:, 0], xy[:, 1],
+                            color='dimgray',
+                            linewidth=5,
+                            zorder=30
+                        )
+                    break
+
+            self.draw()  # Убедимся, что график обновился
+        except Exception as e:
+            print(f"[ERROR] Ошибка в highlight_element: {e}")
+
     def parse_coord(self, value, L_val, W_val, is_y=False):
         if not isinstance(value, str):
             value = str(value)
-        value = value.replace(',', '.').strip()
+        value = value.strip()
         if value == "":
             return 0.0
 
-        try:
-            num = float(value)
-            if num < 0:
-                return L_val + num if not is_y else W_val + num
-            return num
-        except:
-            pass
+        # Если значение отрицательное — преобразуем в формулу от L или W
+        if value.startswith('-') and value[1:].replace('.', '', 1).isdigit():
+            try:
+                num = float(value)
+                if is_y:
+                    return W_val + num  # W - |num|
+                else:
+                    return L_val + num  # L - |num|
+            except:
+                pass
 
-        expr = value.replace("L", str(L_val)).replace("W", str(W_val))
-        expr = re.sub(r"-\((\d+\.?\d*)\)", r" - \1", expr)
-        expr = re.sub(r"[^\d\.\+\-\*\/\(\) ]", "", expr)
-        try:
-            return float(eval(expr))
-        except:
-            return 0.0
+        # Иначе — парсим как формулу
+        return evaluate_expression(value, L_val, W_val)
 
     def draw_operations(self, operations, panel_length, panel_width):
         self.clear_plot()
@@ -140,7 +184,7 @@ class PlotWidget(FigureCanvas):
                     except:
                         diameter_val = 5.0
 
-                    if x_val < 10:  # Правый торец → влево (внутрь)
+                    if x_val < 10:
                         rect = plt.Rectangle(
                             (x_val, y_val - diameter_val / 2),
                             depth_val,
@@ -154,7 +198,7 @@ class PlotWidget(FigureCanvas):
                         self.ax.add_patch(rect)
                         self.operation_patches.append((rect, idx))
                         types_in_use.add(("Торцевое", 'blue'))
-                    elif x_val > L_val - 10:  # Левый торец → влево (внутрь)
+                    elif x_val > L_val - 10:
                         rect = plt.Rectangle(
                             (x_val - depth_val, y_val - diameter_val / 2),
                             depth_val,
@@ -168,7 +212,7 @@ class PlotWidget(FigureCanvas):
                         self.ax.add_patch(rect)
                         self.operation_patches.append((rect, idx))
                         types_in_use.add(("Торцевое", 'blue'))
-                    elif y_val < 10:  # Верхний торец → вниз (внутрь)
+                    elif y_val < 10:
                         rect = plt.Rectangle(
                             (x_val - diameter_val / 2, y_val),
                             diameter_val,
@@ -182,7 +226,7 @@ class PlotWidget(FigureCanvas):
                         self.ax.add_patch(rect)
                         self.operation_patches.append((rect, idx))
                         types_in_use.add(("Торцевое", 'blue'))
-                    elif y_val > W_val - 10:  # Нижний торец → вверх (внутрь)
+                    elif y_val > W_val - 10:
                         rect = plt.Rectangle(
                             (x_val - diameter_val / 2, y_val - depth_val),
                             diameter_val,
@@ -236,6 +280,7 @@ class PlotWidget(FigureCanvas):
                 print(f"Ошибка при отрисовке: {e}")
                 continue
 
+        print(f"[DEBUG] operation_patches заполнен: {len(self.operation_patches)} элементов")
         self.types_in_use = sorted(types_in_use, key=lambda x: x[0])
         self.draw()
 
@@ -249,23 +294,17 @@ class PlotWidget(FigureCanvas):
                 dy = y_click - obj.center[1]
                 if dx*dx + dy*dy <= (obj.radius + 10)**2:
                     self.main_window.table.selectRow(idx)
+                    self.highlight_element(idx)
                     self.main_window.table.scrollTo(self.main_window.table.model().index(idx, 0))
                     break
             elif isinstance(obj, plt.Rectangle):
                 xmin, ymin = obj.get_xy()
                 xmax = xmin + obj.get_width()
                 ymax = ymin + obj.get_height()
-
-                # Увеличиваем зону клика
-                margin_x = 10
-                margin_y = 15
-                click_xmin = xmin - margin_x
-                click_xmax = xmax + margin_x
-                click_ymin = ymin - margin_y
-                click_ymax = ymax + margin_y
-
-                if click_xmin <= x_click <= click_xmax and click_ymin <= y_click <= click_ymax:
+                margin_x, margin_y = 10, 15
+                if xmin - margin_x <= x_click <= xmax + margin_x and ymin - margin_y <= y_click <= ymax + margin_y:
                     self.main_window.table.selectRow(idx)
+                    self.highlight_element(idx)
                     self.main_window.table.scrollTo(self.main_window.table.model().index(idx, 0))
                     break
             elif hasattr(obj, 'get_xydata'):
@@ -290,16 +329,15 @@ class PlotWidget(FigureCanvas):
                     dist = ((x_click - xx)**2 + (y_click - yy)**2)**0.5
                     if dist < 10:
                         self.main_window.table.selectRow(idx)
+                        self.highlight_element(idx)
                         self.main_window.table.scrollTo(self.main_window.table.model().index(idx, 0))
                         break
 
     def on_hover(self, event):
         if event.inaxes != self.ax:
             return
-
         x, y = event.xdata, event.ydata
         found = False
-
         for obj, idx in reversed(self.operation_patches):
             contains = False
             if isinstance(obj, plt.Circle):
@@ -312,16 +350,8 @@ class PlotWidget(FigureCanvas):
                 xmin, ymin = obj.get_xy()
                 xmax = xmin + obj.get_width()
                 ymax = ymin + obj.get_height()
-
-                # Увеличиваем зону срабатывания
-                margin_x = 10
-                margin_y = 15
-                hover_xmin = xmin - margin_x
-                hover_xmax = xmax + margin_x
-                hover_ymin = ymin - margin_y
-                hover_ymax = ymax + margin_y
-
-                if hover_xmin <= x <= hover_xmax and hover_ymin <= y <= hover_ymax:
+                margin_x, margin_y = 10, 15
+                if xmin - margin_x <= x <= xmax + margin_x and ymin - margin_y <= y <= ymax + margin_y:
                     contains = True
             elif hasattr(obj, 'get_xydata'):
                 xy = obj.get_xydata()
@@ -345,12 +375,10 @@ class PlotWidget(FigureCanvas):
                     dist = ((x - xx)**2 + (y - yy)**2)**0.5
                     if dist < 10:
                         contains = True
-
             if contains:
                 self.fig.canvas.setCursor(Qt.PointingHandCursor)
                 found = True
                 break
-
         if not found:
             self.fig.canvas.setCursor(Qt.ArrowCursor)
 
@@ -390,6 +418,17 @@ class EditorWindow(QMainWindow):
         self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["Тип", "X", "Y", "Диаметр", "Глубина"])
+
+        # Разрешаем редактирование
+        self.table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
+        self.table.cellChanged.connect(self.on_table_edit)
+
+        # Подключаем изменение выбора строки
+        self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
+
+        # Выделять всю строку при клике на любую ячейку
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)       
 
         button_layout = QHBoxLayout()
         btn_open = QPushButton("Открыть XML")
@@ -434,15 +473,28 @@ class EditorWindow(QMainWindow):
         if not file_path:
             return
         self.file_path = file_path
+
+        # Отключаем только таблицу
+        self.table.blockSignals(True)
+
+        # Загружаем данные
         self.panel_data, self.cad_operations = xml_handler.load_xml(file_path)
+
+        # Обновляем поля
         self.name_input.setText(self.panel_data.get("PanelName", ""))
         self.length_input.setText(str(self.panel_data.get("PanelLength", "")).replace('.', ','))
         self.width_input.setText(str(self.panel_data.get("PanelWidth", "")).replace('.', ','))
         self.thickness_input.setText(str(self.panel_data.get("PanelThickness", "")).replace('.', ','))
+
+        # Обновляем таблицу и чертёж
         self.load_table()
         self.refresh_plot()
         self.update_legend()
-        QMessageBox.information(self, "Готово", "Файл загружен и чертёж построен!")
+
+        # Включаем таблицу
+        self.table.blockSignals(False)
+
+        QMessageBox.information(self, "Готово", "Файл загружен!")
 
     def load_table(self):
         self.table.setRowCount(0)
@@ -460,6 +512,39 @@ class EditorWindow(QMainWindow):
             self.table.setItem(row, 2, QTableWidgetItem(y_val))
             self.table.setItem(row, 3, QTableWidgetItem(op.get("Diameter", op.get("Width", ""))))
             self.table.setItem(row, 4, QTableWidgetItem(op.get("Depth", "")))
+
+    def on_table_edit(self, row, col):
+        try:
+            keys = ["TypeName", "X1", "Y1", "Diameter", "Depth"]
+            key = keys[col]
+            item = self.table.item(row, col)
+            if item is None:
+                return
+            value = item.text().strip()
+
+            # Автоматическое преобразование отрицательных чисел
+            if key in ["X1", "Y1"]:
+                if value.startswith('-') and value[1:].replace('.', '', 1).isdigit():
+                    try:
+                        num = abs(float(value))
+                        formula = f"L-{num}" if key == "X1" else f"W-{num}"
+                        item.setText(formula)
+                        value = formula
+                    except:
+                        pass
+            elif key in ["Diameter", "Depth"]:
+                try:
+                    num = float(value.replace(',', '.'))
+                    value = f"{num:.1f}"
+                    item.setText(value)
+                except:
+                    value = "0.0"
+
+            self.cad_operations[row][key] = value
+            self.refresh_plot()
+
+        except Exception as e:
+            print(f"Ошибка при редактировании: {e}")
 
     def save_xml(self):
         if not self.file_path:
@@ -503,6 +588,19 @@ class EditorWindow(QMainWindow):
                 label_widget = QLabel(f" ■ {label}")
                 label_widget.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 10pt;")
                 self.legend_layout.addWidget(label_widget)
+
+    def on_selection_changed(self, selected, deselected):
+        print("[DEBUG] on_selection_changed вызван")
+        indexes = self.table.selectionModel().selectedRows()
+        if indexes:
+            row = indexes[0].row()
+            print(f"[DEBUG] Выбрана строка: {row}")
+            if hasattr(self.plot, 'operation_patches') and self.plot.operation_patches:
+                self.plot.highlight_element(row)
+            else:
+                print("[DEBUG] operation_patches пуст или не инициализирован")
+        else:
+            self.plot.clear_highlight()
 
 
 if __name__ == "__main__":
