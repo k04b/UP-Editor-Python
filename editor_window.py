@@ -213,7 +213,7 @@ class PlotWidget(FigureCanvas):
                         color = 'green'
                         label = "Верхняя плоскость"
                     elif type_name == "Back Vertical Hole":
-                        color = 'red'
+                        color = 'magenta'
                         label = "Нижняя плоскость"
                     else:
                         color = 'red'
@@ -337,7 +337,7 @@ class EditorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Редактор УП — MVP")
-        self.setGeometry(100, 100, 1300, 650)
+        self.setGeometry(50, 50, 1300, 650)
         self.file_path = None
         self.panel_data = {}
         self.cad_operations = []
@@ -350,30 +350,35 @@ class EditorWindow(QMainWindow):
         left_widget = QWidget()
         left_layout = QVBoxLayout()
         form_layout = QHBoxLayout()
+        orm_layout = QHBoxLayout()
 
         self.name_input = QLineEdit()
         self.length_input = QLineEdit()
         self.width_input = QLineEdit()
         self.thickness_input = QLineEdit()
 
-        form_layout.addWidget(QLabel("Имя:"))
+        orm_layout.addWidget(QLabel("    Имя"))
+        orm_layout.addWidget(QLabel("    Длинна")) 
+        orm_layout.addWidget(QLabel("    Ширина"))
+        orm_layout.addWidget(QLabel("    Толщина"))      
+        form_layout.addWidget(QLabel(""))
         form_layout.addWidget(self.name_input)
-        form_layout.addWidget(QLabel("Длина:"))
+        form_layout.addWidget(QLabel(""))
         form_layout.addWidget(self.length_input)
-        form_layout.addWidget(QLabel("Ширина:"))
+        form_layout.addWidget(QLabel(""))
         form_layout.addWidget(self.width_input)
-        form_layout.addWidget(QLabel("Толщина:"))
+        form_layout.addWidget(QLabel(""))
         form_layout.addWidget(self.thickness_input)
 
         self.table = QTableWidget()
         self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(["Тип", "X1", "X2", "Y1", "Y2", "Диаметр", "Глубина"])
+        self.table.setHorizontalHeaderLabels(["Тип", "X1", "X2", "Y1", "Y2", "Диам.", "Глуб."])
 
         self.table.setColumnWidth(0, 90)  # Тип — шире
-        self.table.setColumnWidth(1, 50)   # X1
-        self.table.setColumnWidth(2, 50)   # X2
-        self.table.setColumnWidth(3, 50)   # Y1
-        self.table.setColumnWidth(4, 50)   # Y2
+        self.table.setColumnWidth(1, 55)   # X1
+        self.table.setColumnWidth(2, 55)   # X2
+        self.table.setColumnWidth(3, 55)   # Y1
+        self.table.setColumnWidth(4, 55)   # Y2
         self.table.setColumnWidth(5, 40)   # Диаметр
         self.table.setColumnWidth(6, 40)   # Глубина
 
@@ -384,20 +389,32 @@ class EditorWindow(QMainWindow):
         self.table.cellChanged.connect(self.on_table_edit)
         self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
 
+        self.name_input.editingFinished.connect(self.update_panel_data)
+        self.length_input.editingFinished.connect(self.update_panel_data)
+        self.width_input.editingFinished.connect(self.update_panel_data)
+        self.thickness_input.editingFinished.connect(self.update_panel_data)
+
+
         button_layout = QHBoxLayout()
         btn_open = QPushButton("Открыть XML")
         btn_save = QPushButton("Сохранить XML")
-        btn_refresh = QPushButton("Обновить чертёж")
+        btn_add_hole = QPushButton("Добавить отверстие")
+        btn_delete = QPushButton("Удалить отверстие")
 
         btn_open.clicked.connect(self.open_xml)
         btn_save.clicked.connect(self.save_xml)
-        btn_refresh.clicked.connect(self.refresh_plot)
+        btn_add_hole.clicked.connect(self.add_hole_dialog)
+        btn_delete.clicked.connect(self.delete_selected_hole)
+        
 
         button_layout.addWidget(btn_open)
         button_layout.addWidget(btn_save)
-        button_layout.addWidget(btn_refresh)
-
+        button_layout.addWidget(btn_add_hole)  # вместо btn_refresh
+        button_layout.addWidget(btn_delete)  # <-- Новая кнопка
+        
+        left_layout.addLayout(orm_layout)  
         left_layout.addLayout(form_layout)
+             
         left_layout.addWidget(self.table)
         left_layout.addLayout(button_layout)
         left_widget.setLayout(left_layout)
@@ -420,6 +437,32 @@ class EditorWindow(QMainWindow):
 
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
+
+    def delete_selected_hole(self):
+        """Удаляет выделенную операцию"""
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Внимание", "Выберите отверстие для удаления")
+            return
+
+        # Подтверждение (опционально)
+        reply = QMessageBox.question(
+            self, "Удалить?", "Вы уверены, что хотите удалить выбранное отверстие?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.No:
+            return
+
+        # Удаляем с конца, чтобы индексы не сбивались
+        for row in sorted(selected_rows, key=lambda x: x.row(), reverse=True):
+            self.table.removeRow(row.row())
+            del self.cad_operations[row.row()]
+
+        # Обновляем интерфейс
+        self.refresh_plot()
+        self.update_legend()
+        QMessageBox.information(self, "Готово", "Отверстие удалено")
+
 
     def open_xml(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Открыть XML", "", "XML Files (*.xml)")
@@ -448,6 +491,7 @@ class EditorWindow(QMainWindow):
         QMessageBox.information(self, "Готово", "Файл загружен!")
 
     def load_table(self):
+        self.table.blockSignals(True)  # 🔥 Отключаем сигналы
         self.table.setRowCount(0)
         for op in self.cad_operations:
             row = self.table.rowCount()
@@ -475,6 +519,7 @@ class EditorWindow(QMainWindow):
 
             self.table.setItem(row, 5, QTableWidgetItem(op.get("Diameter", op.get("Width", ""))))
             self.table.setItem(row, 6, QTableWidgetItem(op.get("Depth", "")))
+        self.table.blockSignals(False)  # 🔥 Включаем обратно
 
     def on_table_edit(self, row, col):
         try:
@@ -487,7 +532,7 @@ class EditorWindow(QMainWindow):
             if key == "TypeName":
                 internal_value = internal_type(value)
                 self.cad_operations[row]["TypeName"] = internal_value
-                self.load_table()
+                # ❌ Убрали load_table()
                 self.refresh_plot()
                 return
 
@@ -515,7 +560,7 @@ class EditorWindow(QMainWindow):
                 elif key == "Diameter": op["Diameter"] = value
                 elif key == "Depth": op["Depth"] = value
 
-            self.refresh_plot()
+            self.refresh_plot()  # Перерисовываем чертёж
 
         except Exception as e:
             print(f"Ошибка при редактировании: {e}")
@@ -608,6 +653,141 @@ class EditorWindow(QMainWindow):
             row = indexes[0].row()
             self.plot.highlight_element(row)
 
+    def update_panel_data(self):
+        """Обновляет panel_data при изменении полей ввода"""
+        try:
+            self.panel_data["PanelName"] = self.name_input.text().strip()
+
+            length_text = self.length_input.text().strip().replace(',', '.')
+            self.panel_data["PanelLength"] = float(length_text) if length_text else 0.0
+
+            width_text = self.width_input.text().strip().replace(',', '.')
+            self.panel_data["PanelWidth"] = float(width_text) if width_text else 0.0
+
+            thickness_text = self.thickness_input.text().strip().replace(',', '.')
+            self.panel_data["PanelThickness"] = float(thickness_text) if thickness_text else 0.0
+
+            # Обновляем чертёж
+            self.refresh_plot()
+
+        except Exception as e:
+            print(f"Ошибка обновления данных детали: {e}")
+
+    def add_hole_dialog(self):
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, QMessageBox
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Добавить отверстие")
+        dialog.resize(300, 200)
+
+        layout = QVBoxLayout()
+
+        # Выбор типа
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(QLabel("Тип:"))
+        type_combo = QComboBox()
+        type_combo.addItems([
+            "Верхняя плоскость",
+            "Нижняя плоскость",
+            "Торцевое",
+            "Линейная фрезеровка"
+        ])
+        type_layout.addWidget(type_combo)
+        layout.addLayout(type_layout)
+
+        # Поля ввода
+        x1_input = QLineEdit("0")
+        x2_input = QLineEdit("0")
+        y1_input = QLineEdit("0")
+        y2_input = QLineEdit("0")
+        diam_input = QLineEdit("5")
+        depth_input = QLineEdit("16")
+
+        layout.addWidget(QLabel("X1:"))
+        layout.addWidget(x1_input)
+        layout.addWidget(QLabel("X2 (для линии):"))
+        layout.addWidget(x2_input)
+        layout.addWidget(QLabel("Y1:"))
+        layout.addWidget(y1_input)
+        layout.addWidget(QLabel("Y2 (для линии):"))
+        layout.addWidget(y2_input)
+        layout.addWidget(QLabel("Диаметр / Ширина:"))
+        layout.addWidget(diam_input)
+        layout.addWidget(QLabel("Глубина:"))
+        layout.addWidget(depth_input)
+
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("Добавить")
+        cancel_btn = QPushButton("Отмена")
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.setLayout(layout)
+
+        # Поведение X2/Y2
+        def update_inputs():
+            is_line = type_combo.currentText() == "Линейная фрезеровка"
+            x2_input.setEnabled(is_line)
+            y2_input.setEnabled(is_line)
+            diam_input.setPlaceholderText("Ширина" if is_line else "Диаметр")
+
+        type_combo.currentTextChanged.connect(update_inputs)
+        update_inputs()
+
+        # Обработка добавления
+        def on_ok():
+            try:
+                type_display = type_combo.currentText()
+                type_internal = internal_type(type_display)
+
+                x1 = x1_input.text().strip()
+                y1 = y1_input.text().strip()
+                diam = diam_input.text().strip()
+                depth = depth_input.text().strip()
+
+                # Проверка чисел
+                float(x1); float(y1); float(diam); float(depth)
+
+                # Новая операция
+                new_op = {
+                    "TypeName": type_internal,
+                    "X1": x1,
+                    "Y1": y1,
+                    "Diameter": diam,
+                    "Depth": depth
+                }
+
+                if type_internal == "Line":
+                    x2 = x2_input.text().strip()
+                    y2 = y2_input.text().strip()
+                    float(x2); float(y2)
+                    new_op.update({
+                        "BeginX": x1,
+                        "BeginY": y1,
+                        "EndX": x2,
+                        "EndY": y2,
+                        "Width": diam,
+                        "Correction": "1",
+                        "Direction": "6"
+                    })
+
+                self.cad_operations.append(new_op)
+                self.load_table()
+                self.refresh_plot()
+                self.update_legend()  # ✅ Обновляем легенду
+                dialog.accept()
+
+            except ValueError:
+                QMessageBox.critical(dialog, "Ошибка", "Введите корректные числовые значения!")
+            except Exception as e:
+                QMessageBox.critical(dialog, "Ошибка", f"Не удалось добавить отверстие: {e}")
+
+        ok_btn.clicked.connect(on_ok)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        dialog.exec_()            
 
 if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
