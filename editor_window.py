@@ -185,7 +185,26 @@ class PlotWidget(FigureCanvas):
         self.ax.set_xlim(panel_length + margin, -margin)
         self.ax.set_ylim(panel_width + margin, -margin)
         self.ax.set_aspect('equal', adjustable='box')
-        self.ax.set_title("Чертёж детали")
+                # Получаем параметры
+        try:
+            L_val = float(panel_length)
+        except:
+            L_val = 0.0
+        try:
+            W_val = float(panel_width)
+        except:
+            W_val = 0.0
+        thickness = self.main_window.panel_data.get("PanelThickness", "0")
+        name = self.main_window.panel_data.get("PanelName", "Без имени")
+
+        try:
+            T_val = float(str(thickness).replace(',', '.'))
+        except:
+            T_val = 0.0
+
+        title = f"Чертёж детали: {name}"
+        subtitle = f"Размеры: {L_val:.1f} × {W_val:.1f} × {T_val:.1f} мм"
+        self.ax.set_title(f"{title}\n{subtitle}", fontsize=12, loc='left')
         self.ax.axis('off')
 
         rectangle = plt.Rectangle(
@@ -566,18 +585,21 @@ class EditorWindow(QMainWindow):
         btn_add = QPushButton("Добавить отверстие")
         btn_add_path = QPushButton("Добавить путь фрезеровки")
         btn_add_line = QPushButton("Добавить линию")
+        btn_edit_panel = QPushButton("Изменить параметры детали")
 
         btn_open.clicked.connect(self.open_xml)
         btn_save.clicked.connect(self.save_xml)
         btn_add.clicked.connect(lambda: self.edit_operation(-1))
         btn_add_path.clicked.connect(lambda: self.edit_path_dialog(-1))
         btn_add_line.clicked.connect(lambda: self.edit_line_dialog(-1))
+        btn_edit_panel.clicked.connect(self.edit_panel_properties)
 
         button_layout.addWidget(btn_open)
         button_layout.addWidget(btn_save)
         button_layout.addWidget(btn_add)
         button_layout.addWidget(btn_add_path)
         button_layout.addWidget(btn_add_line)
+        button_layout.addWidget(btn_edit_panel)
         button_layout.addStretch()
 
         self.plot = PlotWidget(self)
@@ -587,6 +609,62 @@ class EditorWindow(QMainWindow):
         main_layout.addWidget(self.plot)
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
+
+    def edit_panel_properties(self):
+        """
+        Диалог для редактирования параметров детали: имя, размеры, толщина
+        """
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFormLayout
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Параметры детали")
+        dialog.resize(300, 200)
+
+        layout = QFormLayout()
+
+        name_input = QLineEdit(self.panel_data.get("PanelName", ""))
+        length_input = QLineEdit(str(self.panel_data.get("PanelLength", "")))
+        width_input = QLineEdit(str(self.panel_data.get("PanelWidth", "")))
+        thickness_input = QLineEdit(str(self.panel_data.get("PanelThickness", "")))
+
+        layout.addRow("Имя:", name_input)
+        layout.addRow("Длина:", length_input)
+        layout.addRow("Ширина:", width_input)
+        layout.addRow("Толщина:", thickness_input)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addRow(btn_layout)
+
+        dialog.setLayout(layout)
+
+        def save():
+            try:
+                # Конвертируем строки → числа
+                def to_float(text):
+                    if not text.strip():
+                        return 0.0
+                    return float(text.strip().replace(',', '.'))
+
+                self.panel_data["PanelName"] = name_input.text().strip()
+                self.panel_data["PanelLength"] = to_float(length_input.text())
+                self.panel_data["PanelWidth"] = to_float(width_input.text())
+                self.panel_data["PanelThickness"] = to_float(thickness_input.text())
+
+                self.refresh_plot()
+                dialog.accept()
+            except ValueError:
+                QMessageBox.critical(dialog, "Ошибка", "Введите корректные числовые значения!")
+            except Exception as e:
+                QMessageBox.critical(dialog, "Ошибка", f"Ошибка сохранения: {e}")
+
+        save_btn.clicked.connect(save)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        dialog.exec_()
 
     def open_xml(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Открыть XML", "", "XML Files (*.xml)")
@@ -601,7 +679,11 @@ class EditorWindow(QMainWindow):
             length = float(self.panel_data.get("PanelLength", 0))
             width = float(self.panel_data.get("PanelWidth", 0))
             if length > 0 and width > 0:
-                self.plot.draw_operations(self.cad_operations, length, width)
+                self.plot.draw_operations(
+                    self.cad_operations,
+                    length,
+                    width
+                )
             else:
                 self.plot.clear_plot()
                 self.plot.ax.text(0.5, 0.5, 'Укажите размеры детали', transform=self.plot.ax.transAxes, ha='center')
