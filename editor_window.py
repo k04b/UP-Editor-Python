@@ -468,11 +468,12 @@ class EditorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Редактор УП — Минимализм")
-        self.setGeometry(50, 50, 1300, 800)
+        self.setGeometry(50, 30, 1300, 600)
         self.file_path = None
         self.panel_data = {}
         self.cad_operations = []
         self.init_ui()
+        self.update_window_title()
 
     def edit_line_dialog(self, idx=-1):
         """
@@ -670,7 +671,8 @@ class EditorWindow(QMainWindow):
 
     def add_hole(self, hole_type):
         """
-        Унифицированное добавление отверстия по типу
+        Унифицированное добавление отверстия по типу.
+        Поддерживает формулы: L-100, W/2 и т.д.
         """
         dialog = QDialog(self)
         dialog.setWindowTitle("Добавить отверстие")
@@ -700,24 +702,38 @@ class EditorWindow(QMainWindow):
 
         def save():
             try:
-                x = x_input.text().strip()
-                y = y_input.text().strip()
+                x_str = x_input.text().strip()
+                y_str = y_input.text().strip()
                 diam = diam_input.text().strip()
                 depth = depth_input.text().strip()
-                float(x); float(y); float(diam); float(depth)
+
+                # Проверяем ТОЛЬКО диаметр и глубину — они должны быть числами
+                try:
+                    float(diam)
+                except:
+                    QMessageBox.critical(dialog, "Ошибка", "Диаметр должен быть числом!")
+                    return
+
+                try:
+                    float(depth)
+                except:
+                    QMessageBox.critical(dialog, "Ошибка", "Глубина должна быть числом!")
+                    return
 
                 new_op = {
                     "TypeName": hole_type,
-                    "X1": x,
-                    "Y1": y,
+                    "X1": x_str,   # ← сохраняем как строку (с формулой)
+                    "Y1": y_str,   # ← например: "L-100", "W/2"
                     "Diameter": diam,
                     "Depth": depth
                 }
+
                 self.cad_operations.append(new_op)
                 self.refresh_plot()
                 dialog.accept()
-            except ValueError:
-                QMessageBox.critical(dialog, "Ошибка", "Введите корректные числа!")
+
+            except Exception as e:
+                QMessageBox.critical(dialog, "Ошибка", f"Не удалось сохранить: {e}")
 
         save_btn.clicked.connect(save)
         cancel_btn.clicked.connect(dialog.reject)
@@ -786,6 +802,8 @@ class EditorWindow(QMainWindow):
             return
         self.file_path = file_path
         self.panel_data, self.cad_operations = xml_handler.load_xml(file_path)
+        self.file_path = file_path
+        self.update_window_title()  # ← Новый метод
         self.refresh_plot()
 
     def refresh_plot(self):
@@ -805,10 +823,22 @@ class EditorWindow(QMainWindow):
         except Exception as e:
             print(f"Ошибка: {e}")
 
+    def update_window_title(self):
+        """
+        Обновляет заголовок окна: имя программы + путь к файлу
+        """
+        base_title = "Редактор УП — Минимализм"
+        if self.file_path:
+            self.setWindowTitle(f"{base_title} | {self.file_path}")
+        else:
+            self.setWindowTitle(base_title)
+
+
     def edit_operation(self, idx):
         """
         Открывает диалог редактирования операции.
         Если это Path или Line — открывает специальный диалог.
+        Для остальных — общий диалог с поддержкой формул L, W.
         """
         if idx >= 0:
             op = self.cad_operations[idx]
@@ -819,7 +849,7 @@ class EditorWindow(QMainWindow):
                 self.edit_line_dialog(idx)
                 return
 
-        # Только для НЕ-Path операций
+        # Диалог для отверстий: Верхняя, Нижняя, Торцевое
         dialog = QDialog(self)
         dialog.setWindowTitle("Редактировать отверстие")
         dialog.resize(300, 300)
@@ -829,9 +859,7 @@ class EditorWindow(QMainWindow):
         type_combo.addItems([
             "Верхняя плоскость",
             "Нижняя плоскость",
-            "Торцевое",
-            #"Линейная фрезеровка"
-            # "Путь фрезеровки" — убран, так как он обрабатывается отдельно
+            "Торцевое"
         ])
 
         x_input = QLineEdit("0")
@@ -843,7 +871,7 @@ class EditorWindow(QMainWindow):
         form_layout.addRow("Тип:", type_combo)
         form_layout.addRow("X:", x_input)
         form_layout.addRow("Y:", y_input)
-        form_layout.addRow("Диаметр / Ширина:", diam_input)
+        form_layout.addRow("Диаметр:", diam_input)
         form_layout.addRow("Глубина:", depth_input)
         layout.addLayout(form_layout)
 
@@ -863,13 +891,9 @@ class EditorWindow(QMainWindow):
             op = self.cad_operations[idx]
             type_display = display_type(op["TypeName"])
             type_combo.setCurrentText(type_display)
-            if op["TypeName"] == "Line":
-                x_input.setText(op.get("BeginX", "0"))
-                y_input.setText(op.get("BeginY", "0"))
-            else:
-                x_input.setText(op.get("X1", "0"))
-                y_input.setText(op.get("Y1", "0"))
-            diam_input.setText(op.get("Diameter", op.get("Width", "5")))
+            x_input.setText(op.get("X1", "0"))
+            y_input.setText(op.get("Y1", "0"))
+            diam_input.setText(op.get("Diameter", "5"))
             depth_input.setText(op.get("Depth", "16"))
             delete_btn.setVisible(True)
         else:
@@ -884,31 +908,40 @@ class EditorWindow(QMainWindow):
                 diam = diam_input.text().strip()
                 depth = depth_input.text().strip()
 
-                if idx == -1:  # Добавление
-                    new_op = {
-                        "TypeName": type_internal,
-                        "X1": x, "Y1": y, "Diameter": diam, "Depth": depth
-                    }
-                    if type_internal == "Line":
-                        new_op.update({
-                            "BeginX": x, "BeginY": y, "EndX": "100", "EndY": "100",
-                            "Width": diam, "Correction": "1", "Direction": "6"
-                        })
+                # Проверяем ТОЛЬКО диаметр и глубину — они должны быть числами
+                try:
+                    float(diam)
+                except:
+                    QMessageBox.critical(dialog, "Ошибка", "Диаметр должен быть числом!")
+                    return
+
+                try:
+                    float(depth)
+                except:
+                    QMessageBox.critical(dialog, "Ошибка", "Глубина должна быть числом!")
+                    return
+
+                new_op = {
+                    "TypeName": type_internal,
+                    "X1": x,
+                    "Y1": y,
+                    "Diameter": diam,
+                    "Depth": depth
+                }
+
+                if idx == -1:
                     self.cad_operations.append(new_op)
-                else:  # Редактирование
+                else:
                     op = self.cad_operations[idx]
-                    if type_internal == "Line":
-                        op["BeginX"] = x
-                        op["BeginY"] = y
-                    else:
-                        op["X1"] = x
-                        op["Y1"] = y
+                    op["X1"] = x
+                    op["Y1"] = y
                     op["Diameter"] = diam
                     op["Depth"] = depth
                     op["TypeName"] = type_internal
 
                 self.refresh_plot()
                 dialog.accept()
+
             except Exception as e:
                 QMessageBox.critical(dialog, "Ошибка", f"Не удалось сохранить: {e}")
 
@@ -924,7 +957,6 @@ class EditorWindow(QMainWindow):
         save_btn.clicked.connect(save)
         delete_btn.clicked.connect(delete)
         cancel_btn.clicked.connect(dialog.reject)
-
         dialog.exec_()
 
     def edit_path_dialog(self, idx=-1):
@@ -1159,6 +1191,8 @@ class EditorWindow(QMainWindow):
             # Обновляем текущий путь (если захочешь добавить "Сохранить" позже)
             self.file_path = file_path
             QMessageBox.information(self, "Сохранено", f"Файл успешно сохранён!\n{file_path}")
+            self.file_path = file_path
+            self.update_window_title()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
 
