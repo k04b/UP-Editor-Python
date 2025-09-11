@@ -465,7 +465,7 @@ class EditorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Редактор УП — Минимализм")
-        self.setGeometry(50, 50, 1400, 800)
+        self.setGeometry(50, 50, 1300, 800)
         self.file_path = None
         self.panel_data = {}
         self.cad_operations = []
@@ -908,13 +908,14 @@ class EditorWindow(QMainWindow):
         btn_ok = QPushButton("Сохранить")
         btn_cancel = QPushButton("Отмена")
         btn_layout.addStretch()
+        btn_layout.addWidget(btn_delete_path)
         btn_layout.addWidget(btn_ok)
         btn_layout.addWidget(btn_cancel)
+        
         layout.addWidget(QLabel("Вершины пути:"))
         layout.addWidget(table)
         layout.addLayout(width_layout)
         layout.addLayout(btn_layout)
-        layout.addWidget(btn_delete_path)  # Кнопка внизу
         dialog.setLayout(layout)
 
         # Функции добавления вершин
@@ -1017,16 +1018,29 @@ class EditorWindow(QMainWindow):
         dialog.exec_()
 
     def save_xml(self):
-        if not self.file_path:
-            file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить как...", "", "XML Files (*.xml)")
-            if not file_path:
-                return
-            self.file_path = file_path
+        """
+        Всегда показывает диалог 'Сохранить как...' — даже если файл уже был сохранён.
+        """
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить XML",
+            "",  # Папка по умолчанию
+            "XML Files (*.xml);;All Files (*)"
+        )
+        if not file_path:
+            return  # Пользователь отменил сохранение
+
+        # Добавляем расширение .xml, если не указано
+        if not file_path.lower().endswith('.xml'):
+            file_path += '.xml'
+
         try:
-            xml_handler.save_xml(self.file_path, self.panel_data, self.cad_operations)
-            QMessageBox.information(self, "Сохранено", "Файл успешно сохранён!")
+            xml_handler.save_xml(file_path, self.panel_data, self.cad_operations)
+            # Обновляем текущий путь (если захочешь добавить "Сохранить" позже)
+            self.file_path = file_path
+            QMessageBox.information(self, "Сохранено", f"Файл успешно сохранён!\n{file_path}")
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
 
 
 if __name__ == "__main__":
