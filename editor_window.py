@@ -153,21 +153,39 @@ class PlotWidget(FigureCanvas):
                 break
         self.draw()
 
-    def parse_coord(self, value, L_val, W_val, is_y=False):
+    def parse_coord(self, value, L_val, W_val, is_y=False, is_path=False):
+        """
+        Парсит координату.
+        :param is_path: если True — отключаем обработку `-1` как `L-1`, т.к. это Path
+        """
         if not isinstance(value, str):
             value = str(value)
         value = value.strip()
         if value == "":
             return 0.0
+
+        # Для Path: отрицательные числа — абсолютные координаты
+        if is_path:
+            try:
+                if value.startswith('-') and value[1:].replace('.', '', 1).isdigit():
+                    return float(value)
+                elif value.replace('.', '', 1).isdigit():
+                    return float(value)
+            except:
+                pass
+            return evaluate_expression(value, L_val, W_val)
+
+        # Для остальных: -1 → L - 1 (если is_y=False) или W - 1 (если is_y=True)
         if value.startswith('-') and value[1:].replace('.', '', 1).isdigit():
             try:
                 num = float(value)
                 if is_y:
-                    return W_val + num
+                    return W_val + num  # W - 10 → W + (-10)
                 else:
-                    return L_val + num
+                    return L_val + num  # L - 10 → L + (-10)
             except:
                 pass
+
         return evaluate_expression(value, L_val, W_val)
 
     def draw_operations(self, operations, panel_length, panel_width):
@@ -237,8 +255,8 @@ class PlotWidget(FigureCanvas):
                     points = []
                     for v in vertexes:
                         try:
-                            x = self.parse_coord(v.get("X1", "0"), L_val, W_val)
-                            y = self.parse_coord(v.get("Y1", "0"), L_val, W_val, is_y=True)
+                            x = self.parse_coord(v.get("X1", "0"), L_val, W_val, is_path=True)
+                            y = self.parse_coord(v.get("Y1", "0"), L_val, W_val, is_y=True, is_path=True)
                             points.append((x, y))
                         except:
                             continue
@@ -827,6 +845,7 @@ class EditorWindow(QMainWindow):
         table.setHorizontalHeaderLabels(["Тип", "X1", "Y1", "Radius", "Напр."])
         table.setRowCount(0)
 
+        # Заполняем таблицу, если редактируем
         if idx >= 0:
             op = self.cad_operations[idx]
             vertexes = op.get("Vertexes", [])
@@ -855,21 +874,18 @@ class EditorWindow(QMainWindow):
                     table.setItem(row, 3, QTableWidgetItem(""))
                     table.setItem(row, 4, QTableWidgetItem(""))
 
+        # Кнопки добавления
         btn_layout = QHBoxLayout()
         btn_add_point = QPushButton("Начальная точка")
         btn_add_line = QPushButton("Добавить Line")
         btn_add_arc = QPushButton("Добавить Arc")
-        btn_delete = QPushButton("Удалить")
-        btn_ok = QPushButton("Сохранить")
-        btn_cancel = QPushButton("Отмена")
+        btn_delete_vertex = QPushButton("Удалить вершину")
         btn_layout.addWidget(btn_add_point)
         btn_layout.addWidget(btn_add_line)
         btn_layout.addWidget(btn_add_arc)
-        btn_layout.addWidget(btn_delete)
-        btn_layout.addStretch()
-        btn_layout.addWidget(btn_ok)
-        btn_layout.addWidget(btn_cancel)
+        btn_layout.addWidget(btn_delete_vertex)
 
+        # Поля ширины и глубины
         width_layout = QHBoxLayout()
         width_layout.addWidget(QLabel("Ширина:"))
         width_input = QLineEdit("8")
@@ -878,17 +894,30 @@ class EditorWindow(QMainWindow):
         depth_input = QLineEdit("17")
         width_layout.addWidget(depth_input)
 
+        # Кнопка "Удалить весь путь" — только при редактировании
+        btn_delete_path = QPushButton("Удалить весь путь")
         if idx >= 0:
+            btn_delete_path.setVisible(True)
             op = self.cad_operations[idx]
             width_input.setText(op.get("Width", "8"))
             depth_input.setText(op.get("Depth", "17"))
+        else:
+            btn_delete_path.setVisible(False)
 
+        # Кнопки OK/Cancel
+        btn_ok = QPushButton("Сохранить")
+        btn_cancel = QPushButton("Отмена")
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_ok)
+        btn_layout.addWidget(btn_cancel)
         layout.addWidget(QLabel("Вершины пути:"))
         layout.addWidget(table)
         layout.addLayout(width_layout)
         layout.addLayout(btn_layout)
+        layout.addWidget(btn_delete_path)  # Кнопка внизу
         dialog.setLayout(layout)
 
+        # Функции добавления вершин
         def add_vertex(vertex_type, x="0", y="0", radius="", direction="1"):
             row = table.rowCount()
             table.insertRow(row)
@@ -914,15 +943,18 @@ class EditorWindow(QMainWindow):
                 dir_combo.setCurrentText(direction)
                 table.setCellWidget(row, 4, dir_combo)
 
+        # Привязка кнопок
         btn_add_point.clicked.connect(lambda: add_vertex("Point", "0", "0"))
         btn_add_line.clicked.connect(lambda: add_vertex("Line", "0", "0"))
         btn_add_arc.clicked.connect(lambda: add_vertex("Arc", "0", "0", "0", "1"))
-        btn_delete.clicked.connect(lambda: table.removeRow(table.currentRow()))
+        btn_delete_vertex.clicked.connect(lambda: table.removeRow(table.currentRow()))
 
+        # Обработчик сохранения
         def on_ok():
             if table.rowCount() == 0:
                 QMessageBox.warning(dialog, "Ошибка", "Добавьте хотя бы начальную точку")
                 return
+
             vertexes = []
             for row in range(table.rowCount()):
                 item0 = table.cellWidget(row, 0)
@@ -944,8 +976,9 @@ class EditorWindow(QMainWindow):
                     elif t == "Arc":
                         base["type"] = "Arc"
                         base["Radius"] = radius_item.text().strip() if radius_item else "0"
-                        base["Direction"] = dir_item.currentText()
+                        base["Direction"] = dir_item.currentText() if dir_item else "1"
                     vertexes.append(base)
+
             new_op = {
                 "TypeName": "Path",
                 "Width": width_input.text().strip(),
@@ -953,15 +986,34 @@ class EditorWindow(QMainWindow):
                 "Correction": "2", "CorrectionExtra": "0", "Close": "0",
                 "Empty": "0", "Relative": "0", "Enable": "1", "Vertexes": vertexes
             }
+
             if idx >= 0:
                 self.cad_operations[idx] = new_op
+                self.refresh_plot()
+                dialog.accept()  # Закрываем диалог
             else:
                 self.cad_operations.append(new_op)
-            self.refresh_plot()
-            dialog.accept()
+                self.refresh_plot()
+                dialog.accept()
+
+        # Кнопка "Удалить весь путь"
+        def on_delete_path():
+            if idx < 0:
+                return
+            reply = QMessageBox.question(
+                dialog, "Удалить путь?",
+                "Вы действительно хотите удалить весь путь?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                del self.cad_operations[idx]
+                self.refresh_plot()
+                dialog.accept()  # Закрываем диалог
 
         btn_ok.clicked.connect(on_ok)
         btn_cancel.clicked.connect(dialog.reject)
+        btn_delete_path.clicked.connect(on_delete_path)  # Подключаем отдельный обработчик
+
         dialog.exec_()
 
     def save_xml(self):
