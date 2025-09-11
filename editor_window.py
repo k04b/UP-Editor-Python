@@ -462,6 +462,9 @@ class PlotWidget(FigureCanvas):
                     break
 
 class EditorWindow(QMainWindow):
+
+
+    
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Редактор УП — Минимализм")
@@ -597,36 +600,129 @@ class EditorWindow(QMainWindow):
         central_widget = QWidget()
         main_layout = QVBoxLayout()
 
-        button_layout = QHBoxLayout()
-        btn_open = QPushButton("Открыть XML")
-        btn_save = QPushButton("Сохранить XML")
-        btn_add = QPushButton("Добавить отверстие")
-        btn_add_path = QPushButton("Добавить путь фрезеровки")
-        btn_add_line = QPushButton("Добавить линию")
-        btn_edit_panel = QPushButton("Изменить параметры детали")
+        # === Создаём меню ===
+        menu_bar = self.menuBar()
 
-        btn_open.clicked.connect(self.open_xml)
-        btn_save.clicked.connect(self.save_xml)
-        btn_add.clicked.connect(lambda: self.edit_operation(-1))
-        btn_add_path.clicked.connect(lambda: self.edit_path_dialog(-1))
-        btn_add_line.clicked.connect(lambda: self.edit_line_dialog(-1))
-        btn_edit_panel.clicked.connect(self.edit_panel_properties)
+        # Меню "Файл"
+        file_menu = menu_bar.addMenu("Файл")
+        action_open = file_menu.addAction("Открыть XML")
+        action_save = file_menu.addAction("Сохранить XML")
 
-        button_layout.addWidget(btn_open)
-        button_layout.addWidget(btn_save)
-        button_layout.addWidget(btn_add)
-        button_layout.addWidget(btn_add_path)
-        button_layout.addWidget(btn_add_line)
-        button_layout.addWidget(btn_edit_panel)
-        button_layout.addStretch()
+        # Меню "Добавить отверстие"
+        add_hole_menu = menu_bar.addMenu("Добавить отверстие")
+        action_top = add_hole_menu.addAction("Верхняя плоскость")
+        action_back = add_hole_menu.addAction("Нижняя плоскость")
+        action_horizontal = add_hole_menu.addAction("Торцевое")
 
+        # Меню "Добавить фрезеровку"
+        add_mill_menu = menu_bar.addMenu("Добавить фрезеровку")
+        action_path = add_mill_menu.addAction("Путь фрезеровки")
+        action_line = add_mill_menu.addAction("Линейная фрезеровка")
+
+        # Меню "Параметры детали"
+        panel_menu = menu_bar.addMenu("Параметры детали")
+        action_edit_panel = panel_menu.addAction("Изменить параметры детали")
+
+        # === Привязка действий ===
+        action_open.triggered.connect(self.open_xml)
+        action_save.triggered.connect(self.save_xml)
+
+        action_top.triggered.connect(lambda: self.add_hole("Vertical Hole"))
+        action_back.triggered.connect(lambda: self.add_hole("Back Vertical Hole"))
+        action_horizontal.triggered.connect(lambda: self.add_hole("Horizontal Hole"))
+
+        action_path.triggered.connect(lambda: self.edit_path_dialog(-1))
+        action_line.triggered.connect(lambda: self.edit_line_dialog(-1))
+
+        action_edit_panel.triggered.connect(self.edit_panel_properties)
+
+        # === Поля параметров детали (опционально, можно оставить) ===
+        params_layout = QHBoxLayout()
+        self.name_input = QLineEdit()
+        self.length_input = QLineEdit()
+        self.width_input = QLineEdit()
+        self.thickness_input = QLineEdit()
+
+       # params_layout.addWidget(QLabel("Имя:"))
+       # params_layout.addWidget(self.name_input)
+       # params_layout.addWidget(QLabel("Длина:"))
+        #params_layout.addWidget(self.length_input)
+        #params_layout.addWidget(QLabel("Ширина:"))
+        #params_layout.addWidget(self.width_input)
+       # params_layout.addWidget(QLabel("Толщина:"))
+        #params_layout.addWidget(self.thickness_input)
+
+        # === Чертёж ===
         self.plot = PlotWidget(self)
         self.plot.fig.canvas.mpl_connect('button_press_event', self.plot.on_click)
 
-        main_layout.addLayout(button_layout)
+        # === Добавляем всё в layout ===
+        main_layout.addLayout(params_layout)  # Можно убрать, если хочешь только меню
         main_layout.addWidget(self.plot)
         central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
+
+        # === Привязка обновления данных ===
+        self.name_input.editingFinished.connect(self.update_panel_data)
+        self.length_input.editingFinished.connect(self.update_panel_data)
+        self.width_input.editingFinished.connect(self.update_panel_data)
+        self.thickness_input.editingFinished.connect(self.update_panel_data)
+
+    def add_hole(self, hole_type):
+        """
+        Унифицированное добавление отверстия по типу
+        """
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Добавить отверстие")
+        dialog.resize(300, 250)
+        layout = QVBoxLayout()
+
+        x_input = QLineEdit("0")
+        y_input = QLineEdit("0")
+        diam_input = QLineEdit("5")
+        depth_input = QLineEdit("16")
+
+        form_layout = QFormLayout()
+        form_layout.addRow("X:", x_input)
+        form_layout.addRow("Y:", y_input)
+        form_layout.addRow("Диаметр:", diam_input)
+        form_layout.addRow("Глубина:", depth_input)
+        layout.addLayout(form_layout)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        cancel_btn = QPushButton("Отмена")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.setLayout(layout)
+
+        def save():
+            try:
+                x = x_input.text().strip()
+                y = y_input.text().strip()
+                diam = diam_input.text().strip()
+                depth = depth_input.text().strip()
+                float(x); float(y); float(diam); float(depth)
+
+                new_op = {
+                    "TypeName": hole_type,
+                    "X1": x,
+                    "Y1": y,
+                    "Diameter": diam,
+                    "Depth": depth
+                }
+                self.cad_operations.append(new_op)
+                self.refresh_plot()
+                dialog.accept()
+            except ValueError:
+                QMessageBox.critical(dialog, "Ошибка", "Введите корректные числа!")
+
+        save_btn.clicked.connect(save)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec_()
+
 
     def edit_panel_properties(self):
         """
@@ -1016,6 +1112,30 @@ class EditorWindow(QMainWindow):
         btn_delete_path.clicked.connect(on_delete_path)  # Подключаем отдельный обработчик
 
         dialog.exec_()
+
+    def update_panel_data(self):
+        """Обновляет panel_data при изменении полей ввода"""
+        try:
+            # Сохраняем имя
+            self.panel_data["PanelName"] = self.name_input.text().strip()
+
+            # Конвертируем строку в число (поддержка запятой)
+            def to_float(text):
+                if not text.strip():
+                    return 0.0
+                return float(text.strip().replace(',', '.'))
+
+            self.panel_data["PanelLength"] = to_float(self.length_input.text())
+            self.panel_data["PanelWidth"] = to_float(self.width_input.text())
+            self.panel_data["PanelThickness"] = to_float(self.thickness_input.text())
+
+            # Обновляем чертёж (и заголовок)
+            self.refresh_plot()
+
+        except Exception as e:
+            print(f"Ошибка обновления данных детали: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Некорректные данные: {e}")
+
 
     def save_xml(self):
         """
