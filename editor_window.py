@@ -472,6 +472,8 @@ class EditorWindow(QMainWindow):
         self.file_path = None
         self.panel_data = {}
         self.cad_operations = []
+        self.undo_stack = []  # ← Стек для отмены
+        self.max_undo_steps = 50  # Максимум шагов
         self.init_ui()
         self.update_window_title()
 
@@ -549,6 +551,7 @@ class EditorWindow(QMainWindow):
 
         def save():
             try:
+                self.save_state("Редактирование линии")  # ←
                 x1 = x1_input.text().strip()
                 y1 = y1_input.text().strip()
                 x2 = x2_input.text().strip()
@@ -587,6 +590,7 @@ class EditorWindow(QMainWindow):
                 reply = QMessageBox.question(dialog, "Удалить?", "Удалить эту линию?",
                                             QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
+                    self.save_state("Удаление линии")  # ← Добавлено
                     del self.cad_operations[idx]
                     self.refresh_plot()
                     dialog.accept()
@@ -669,6 +673,36 @@ class EditorWindow(QMainWindow):
         self.width_input.editingFinished.connect(self.update_panel_data)
         self.thickness_input.editingFinished.connect(self.update_panel_data)
 
+        # Горячая клавиша Ctrl+Z
+        from PyQt5.QtGui import QKeySequence
+        from PyQt5.QtWidgets import QShortcut
+        undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        undo_shortcut.activated.connect(self.undo_action)
+
+    def undo_action(self):
+        """
+        Отменяет последнее действие.
+        """
+        if not self.undo_stack:
+            QMessageBox.information(self, "Отмена", "Нет действий для отмены.")
+            return
+
+        # Восстанавливаем предыдущее состояние
+        state = self.undo_stack.pop()
+        self.panel_data = state["panel_data"]
+        self.cad_operations = state["cad_operations"]
+
+        # Обновляем интерфейс
+        if hasattr(self, 'name_input'):
+            self.name_input.setText(self.panel_data.get("PanelName", ""))
+            self.length_input.setText(str(self.panel_data.get("PanelLength", "")).replace('.', ','))
+            self.width_input.setText(str(self.panel_data.get("PanelWidth", "")).replace('.', ','))
+            self.thickness_input.setText(str(self.panel_data.get("PanelThickness", "")).replace('.', ','))
+
+        self.refresh_plot()
+        QMessageBox.information(self, "Отменено", f"Действие '{state['action']}' отменено.")        
+
+
     def add_hole(self, hole_type):
         """
         Унифицированное добавление отверстия по типу.
@@ -703,6 +737,7 @@ class EditorWindow(QMainWindow):
 
         def save():
             try:
+                self.save_state("Добавление отверстия")  # ←
                 x_str = x_input.text().strip()
                 y_str = y_input.text().strip()
                 diam = diam_input.text().strip()
@@ -932,6 +967,7 @@ class EditorWindow(QMainWindow):
 
         def save():
             try:
+                self.save_state("Редактирование отверстия")  # ← Сохраняем состояние
                 type_display = type_combo.currentText()
                 type_internal = internal_type(type_display)
                 x_str = x_input.text().strip()
@@ -1010,6 +1046,7 @@ class EditorWindow(QMainWindow):
                 reply = QMessageBox.question(dialog, "Удалить?", "Удалить это отверстие?",
                                             QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
+                    self.save_state("Удаление отверстия")
                     del self.cad_operations[idx]
                     self.refresh_plot()
                     dialog.accept()
@@ -1141,6 +1178,7 @@ class EditorWindow(QMainWindow):
 
         # Обработчик сохранения
         def on_ok():
+            self.save_state("Редактирование пути фрезеровки")  # ←
             if table.rowCount() == 0:
                 QMessageBox.warning(dialog, "Ошибка", "Добавьте хотя бы начальную точку")
                 return
@@ -1196,6 +1234,7 @@ class EditorWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
+                self.save_state("Удаление пути фрезеровки")  # ←
                 del self.cad_operations[idx]
                 self.refresh_plot()
                 dialog.accept()  # Закрываем диалог
@@ -1209,6 +1248,7 @@ class EditorWindow(QMainWindow):
     def update_panel_data(self):
         """Обновляет panel_data при изменении полей ввода"""
         try:
+            self.save_state("Изменение параметров детали")  # ←
             # Сохраняем имя
             self.panel_data["PanelName"] = self.name_input.text().strip()
 
@@ -1256,6 +1296,20 @@ class EditorWindow(QMainWindow):
             self.update_window_title()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+
+    def save_state(self, action_name="Изменение"):
+        """
+        Сохраняет текущее состояние в стеке отмены.
+        """
+        import copy
+        state = {
+            "panel_data": copy.deepcopy(self.panel_data),
+            "cad_operations": copy.deepcopy(self.cad_operations),
+            "action": action_name
+        }
+        self.undo_stack.append(state)
+        if len(self.undo_stack) > self.max_undo_steps:
+            self.undo_stack.pop(0)  # Удаляем самый старый            
 
 
 if __name__ == "__main__":
