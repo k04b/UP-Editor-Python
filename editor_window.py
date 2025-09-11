@@ -673,6 +673,7 @@ class EditorWindow(QMainWindow):
         """
         Унифицированное добавление отверстия по типу.
         Поддерживает формулы: L-100, W/2 и т.д.
+        Для "Торцевое" — проверяет, что на торце.
         """
         dialog = QDialog(self)
         dialog.setWindowTitle("Добавить отверстие")
@@ -707,27 +708,60 @@ class EditorWindow(QMainWindow):
                 diam = diam_input.text().strip()
                 depth = depth_input.text().strip()
 
-                # Проверяем ТОЛЬКО диаметр и глубину — они должны быть числами
+                # Проверяем диаметр и глубину
                 try:
                     float(diam)
                 except:
                     QMessageBox.critical(dialog, "Ошибка", "Диаметр должен быть числом!")
                     return
-
                 try:
                     float(depth)
                 except:
                     QMessageBox.critical(dialog, "Ошибка", "Глубина должна быть числом!")
                     return
 
+                # Получаем размеры детали
+                try:
+                    L_val = float(evaluate_expression(str(self.panel_data.get("PanelLength", 0)), 0, 0))
+                except:
+                    L_val = 0.0
+                try:
+                    W_val = float(evaluate_expression(str(self.panel_data.get("PanelWidth", 0)), 0, 0))
+                except:
+                    W_val = 0.0
+
+                # Вычисляем координаты
+                x_val = evaluate_expression(x_str, L_val, W_val)
+                y_val = evaluate_expression(y_str, L_val, W_val)
+
+                # Проверка: только для "Торцевое"
+                if hole_type == "Horizontal Hole":
+                    tolerance = 0.1
+                    is_on_edge = (
+                        abs(x_val) < tolerance or
+                        abs(x_val - L_val) < tolerance or
+                        abs(y_val) < tolerance or
+                        abs(y_val - W_val) < tolerance
+                    )
+                    if not is_on_edge:
+                        QMessageBox.warning(
+                            dialog,
+                            "Ошибка",
+                            f"Торцевое отверстие должно быть на торце:\n\n"
+                            f"• Правый: X ≈ 0\n"
+                            f"• Левый: X ≈ {L_val:.0f}\n"
+                            f"• Верхний: Y ≈ 0\n"
+                            f"• Нижний: Y ≈ {W_val:.0f}"
+                        )
+                        return
+
                 new_op = {
                     "TypeName": hole_type,
-                    "X1": x_str,   # ← сохраняем как строку (с формулой)
-                    "Y1": y_str,   # ← например: "L-100", "W/2"
+                    "X1": x_str,
+                    "Y1": y_str,
                     "Diameter": diam,
                     "Depth": depth
                 }
-
                 self.cad_operations.append(new_op)
                 self.refresh_plot()
                 dialog.accept()
@@ -836,9 +870,8 @@ class EditorWindow(QMainWindow):
 
     def edit_operation(self, idx):
         """
-        Открывает диалог редактирования операции.
-        Если это Path или Line — открывает специальный диалог.
-        Для остальных — общий диалог с поддержкой формул L, W.
+        Диалог редактирования отверстия.
+        Для "Торцевое" — строгая проверка: только на торце.
         """
         if idx >= 0:
             op = self.cad_operations[idx]
@@ -849,7 +882,6 @@ class EditorWindow(QMainWindow):
                 self.edit_line_dialog(idx)
                 return
 
-        # Диалог для отверстий: Верхняя, Нижняя, Торцевое
         dialog = QDialog(self)
         dialog.setWindowTitle("Редактировать отверстие")
         dialog.resize(300, 300)
@@ -886,11 +918,10 @@ class EditorWindow(QMainWindow):
 
         dialog.setLayout(layout)
 
-        # Заполняем данные, если редактируем
+        # Заполняем при редактировании
         if idx >= 0:
             op = self.cad_operations[idx]
-            type_display = display_type(op["TypeName"])
-            type_combo.setCurrentText(type_display)
+            type_combo.setCurrentText(display_type(op["TypeName"]))
             x_input.setText(op.get("X1", "0"))
             y_input.setText(op.get("Y1", "0"))
             diam_input.setText(op.get("Diameter", "5"))
@@ -903,28 +934,62 @@ class EditorWindow(QMainWindow):
             try:
                 type_display = type_combo.currentText()
                 type_internal = internal_type(type_display)
-                x = x_input.text().strip()
-                y = y_input.text().strip()
+                x_str = x_input.text().strip()
+                y_str = y_input.text().strip()
                 diam = diam_input.text().strip()
                 depth = depth_input.text().strip()
 
-                # Проверяем ТОЛЬКО диаметр и глубину — они должны быть числами
+                # Проверяем диаметр и глубину
                 try:
                     float(diam)
                 except:
                     QMessageBox.critical(dialog, "Ошибка", "Диаметр должен быть числом!")
                     return
-
                 try:
                     float(depth)
                 except:
                     QMessageBox.critical(dialog, "Ошибка", "Глубина должна быть числом!")
                     return
 
+                # Получаем размеры детали
+                try:
+                    L_val = float(evaluate_expression(str(self.panel_data.get("PanelLength", 0)), 0, 0))
+                except:
+                    L_val = 0.0
+                try:
+                    W_val = float(evaluate_expression(str(self.panel_data.get("PanelWidth", 0)), 0, 0))
+                except:
+                    W_val = 0.0
+
+                # Вычисляем X и Y
+                x_val = evaluate_expression(x_str, L_val, W_val)
+                y_val = evaluate_expression(y_str, L_val, W_val)
+
+                # Проверка: только для "Торцевое"
+                if type_internal == "Horizontal Hole":
+                    tolerance = 0.1
+                    is_on_edge = (
+                        abs(x_val) < tolerance or           # Правый торец: X ≈ 0
+                        abs(x_val - L_val) < tolerance or   # Левый торец: X ≈ L
+                        abs(y_val) < tolerance or           # Верхний торец: Y ≈ 0
+                        abs(y_val - W_val) < tolerance      # Нижний торец: Y ≈ W
+                    )
+                    if not is_on_edge:
+                        QMessageBox.warning(
+                            dialog,
+                            "Ошибка",
+                            f"Торцевое отверстие должно быть на торце:\n\n"
+                            f"• Правый: X ≈ 0\n"
+                            f"• Левый: X ≈ {L_val:.0f}\n"
+                            f"• Верхний: Y ≈ 0\n"
+                            f"• Нижний: Y ≈ {W_val:.0f}"
+                        )
+                        return  # ❌ Блокируем сохранение
+
                 new_op = {
                     "TypeName": type_internal,
-                    "X1": x,
-                    "Y1": y,
+                    "X1": x_str,
+                    "Y1": y_str,
                     "Diameter": diam,
                     "Depth": depth
                 }
@@ -932,12 +997,7 @@ class EditorWindow(QMainWindow):
                 if idx == -1:
                     self.cad_operations.append(new_op)
                 else:
-                    op = self.cad_operations[idx]
-                    op["X1"] = x
-                    op["Y1"] = y
-                    op["Diameter"] = diam
-                    op["Depth"] = depth
-                    op["TypeName"] = type_internal
+                    self.cad_operations[idx] = new_op
 
                 self.refresh_plot()
                 dialog.accept()
@@ -958,6 +1018,7 @@ class EditorWindow(QMainWindow):
         delete_btn.clicked.connect(delete)
         cancel_btn.clicked.connect(dialog.reject)
         dialog.exec_()
+        
 
     def edit_path_dialog(self, idx=-1):
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QComboBox, \
