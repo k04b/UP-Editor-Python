@@ -401,65 +401,238 @@ class PlotWidget(FigureCanvas):
         self.draw()
 
     def on_click(self, event):
-        if event.inaxes != self.ax:
+        if event.inaxes != self.ax or not event.xdata or not event.ydata:
             return
+
         x_click, y_click = event.xdata, event.ydata
+        clicked_idx = None
         for obj, idx in reversed(self.operation_patches):
-            if isinstance(obj, plt.Circle):
-                dx = x_click - obj.center[0]
-                dy = y_click - obj.center[1]
-                if dx*dx + dy*dy <= (obj.radius + 10)**2:
-                    self.main_window.edit_operation(idx)
-                    break
-            elif isinstance(obj, plt.Rectangle):
-                xmin, ymin = obj.get_xy()
-                xmax = xmin + obj.get_width()
-                ymax = ymin + obj.get_height()
-                margin_x, margin_y = 10, 15
-                if xmin - margin_x <= x_click <= xmax + margin_x and ymin - margin_y <= y_click <= ymax + margin_y:
-                    self.main_window.edit_operation(idx)
-                    break
-            elif hasattr(obj, 'get_xydata'):
-                xy = obj.get_xydata()
-                if len(xy) >= 2:
-                    x1, y1 = xy[0]
-                    x2, y2 = xy[1]
-                    A = x_click - x1
-                    B = y_click - y1
-                    C = x2 - x1
-                    D = y2 - y1
-                    dot = A * C + B * D
-                    len_sq = C * C + D * D
-                    param = -1 if len_sq == 0 else dot / len_sq
-                    if param < 0:
-                        xx, yy = x1, y1
-                    elif param > 1:
-                        xx, yy = x2, y2
-                    else:
-                        xx = x1 + param * C
-                        yy = y1 + param * D
-                    dist = ((x_click - xx)**2 + (y_click - yy)**2)**0.5
-                    if dist < 10:
-                        self.main_window.edit_operation(idx)
+            try:
+                if isinstance(obj, plt.Circle):
+                    dx = x_click - obj.center[0]
+                    dy = y_click - obj.center[1]
+                    if dx*dx + dy*dy <= (obj.radius + 10)**2:
+                        clicked_idx = idx
                         break
-            elif isinstance(obj, Arc):  # ← Добавь это!
-                # Проверяем, находится ли точка рядом с дугой
-                # Упрощённо: проверим расстояние до начальной и конечной точки
-                start_angle = obj.theta1
-                end_angle = obj.theta2
-                center = obj.center
-                radius = obj.width / 2
+                elif isinstance(obj, plt.Rectangle):
+                    xmin, ymin = obj.get_xy()
+                    xmax = xmin + obj.get_width()
+                    ymax = ymin + obj.get_height()
+                    margin_x, margin_y = 10, 15
+                    if xmin - margin_x <= x_click <= xmax + margin_x and ymin - margin_y <= y_click <= ymax + margin_y:
+                        clicked_idx = idx
+                        break
+                elif hasattr(obj, 'get_xydata'):
+                    xy = obj.get_xydata()
+                    if len(xy) >= 2:
+                        x1, y1 = xy[0]
+                        x2, y2 = xy[1]
+                        A = x_click - x1
+                        B = y_click - y1
+                        C = x2 - x1
+                        D = y2 - y1
+                        dot = A * C + B * D
+                        len_sq = C * C + D * D
+                        param = -1 if len_sq == 0 else dot / len_sq
+                        if param < 0:
+                            xx, yy = x1, y1
+                        elif param > 1:
+                            xx, yy = x2, y2
+                        else:
+                            xx = x1 + param * C
+                            yy = y1 + param * D
+                        dist = ((x_click - xx)**2 + (y_click - yy)**2)**0.5
+                        if dist < 10:
+                            clicked_idx = idx
+                            break
+                elif isinstance(obj, Arc):
+                    center = obj.center
+                    radius = obj.width / 2
+                    import numpy as np
+                    angles = np.linspace(np.radians(obj.theta1), np.radians(obj.theta2), 100)
+                    x_arc = center[0] + radius * np.cos(angles)
+                    y_arc = center[1] + radius * np.sin(angles)
+                    dist = np.min((x_arc - x_click)**2 + (y_arc - y_click)**2)**0.5
+                    if dist < 10:
+                        clicked_idx = idx
+                        break
+            except:
+                continue
 
-                # Получим точки дуги (аппроксимация)
-                import numpy as np
-                angles = np.linspace(np.radians(start_angle), np.radians(end_angle), 100)
-                x_arc = center[0] + radius * np.cos(angles)
-                y_arc = center[1] + radius * np.sin(angles)
+        if clicked_idx is not None:
+            op = self.main_window.cad_operations[clicked_idx]
+            type_name = op["TypeName"]
 
-                dist = np.min((x_arc - x_click)**2 + (y_arc - y_click)**2)**0.5
-                if dist < 10:
-                    self.main_window.edit_operation(idx)
-                    break
+            if event.button == 1:  # Левый клик
+                self.main_window.edit_operation(clicked_idx)
+            elif event.button == 3:  # Правый клик
+                if type_name in ["Vertical Hole", "Back Vertical Hole", "Horizontal Hole"]:
+                    self.show_context_menu(event, clicked_idx)
+
+    def show_context_menu(self, event, idx):
+        from PyQt5.QtWidgets import QMenu
+        from PyQt5.QtCore import QPoint
+
+        menu = QMenu(self.main_window)
+        action_mirror_x = menu.addAction("Отразить/скопировать по X")
+        action_mirror_y = menu.addAction("Отразить/скопировать по Y")
+
+        # 🔥 Правильное преобразование координат
+        pos = QPoint(int(event.x), self.height() - int(event.y))
+        global_pos = self.mapToGlobal(pos)
+
+        action = menu.exec_(global_pos)
+        if action == action_mirror_x:
+            self.mirror_operation(idx, axis='x')
+        elif action == action_mirror_y:
+            self.mirror_operation(idx, axis='y')
+
+    def mirror_operation(self, idx, axis):
+        op = self.main_window.cad_operations[idx]
+        try:
+            L_val = float(evaluate_expression(str(self.main_window.panel_data.get("PanelLength", 0)), 0, 0))
+        except:
+            L_val = 0.0
+        try:
+            W_val = float(evaluate_expression(str(self.main_window.panel_data.get("PanelWidth", 0)), 0, 0))
+        except:
+            W_val = 0.0
+
+        dialog = QDialog(self.main_window)
+        dialog.setWindowTitle("Отразить с копированием?")
+        dialog.resize(300, 150)
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel(f"Отразить по {axis.upper()} с копированием?"))
+        btn_layout = QHBoxLayout()
+        yes_btn = QPushButton("Да")
+        no_btn = QPushButton("Нет")
+        btn_layout.addWidget(yes_btn)
+        btn_layout.addWidget(no_btn)
+        layout.addLayout(btn_layout)
+        dialog.setLayout(layout)
+
+        result = [None]
+
+        def on_yes():
+            result[0] = 'copy'
+            dialog.accept()
+
+        def on_no():
+            result[0] = 'move'
+            dialog.accept()
+
+        yes_btn.clicked.connect(on_yes)
+        no_btn.clicked.connect(on_no)
+
+        if dialog.exec_() == QDialog.Rejected:
+            return
+
+        mode = result[0]
+        x_str = op.get("X1", "0").strip()
+        y_str = op.get("Y1", "0").strip()
+
+        # --- Обработка X ---
+        try:
+            x_val = evaluate_expression(x_str, L_val, W_val)
+        except:
+            x_val = 0.0
+
+        # Определяем, является ли X отрицательным (L - ...)
+        is_x_negative = False
+        try:
+            if isinstance(x_str, str) and x_str.startswith('-') and x_str[1:].replace('.', '', 1).isdigit():
+                offset = float(x_str[1:])
+                original_offset = offset
+                new_x_val = offset  # Расстояние от левого края
+                is_x_negative = True
+            else:
+                # Положительное или формула: определяем расстояние до ближайшего края
+                dist_to_left = abs(x_val - L_val)
+                dist_to_right = abs(x_val)
+                tolerance = 1.0
+                if dist_to_left < tolerance:
+                    original_offset = L_val - x_val
+                    new_x_val = original_offset
+                    is_x_negative = True
+                elif dist_to_right < tolerance:
+                    original_offset = x_val
+                    new_x_val = original_offset
+                    is_x_negative = False
+                else:
+                    original_offset = 0.0
+                    new_x_val = x_val
+        except:
+            original_offset = 0.0
+            new_x_val = x_val
+
+        # --- Обработка Y ---
+        try:
+            y_val = evaluate_expression(y_str, L_val, W_val)
+        except:
+            y_val = 0.0
+
+        is_y_negative = False
+        try:
+            if isinstance(y_str, str) and y_str.startswith('-') and y_str[1:].replace('.', '', 1).isdigit():
+                offset = float(y_str[1:])
+                original_offset_y = offset
+                new_y_val = offset
+                is_y_negative = True
+            else:
+                dist_to_top = abs(y_val)
+                dist_to_bottom = abs(y_val - W_val)
+                tolerance = 1.0
+                if dist_to_bottom < tolerance:
+                    original_offset_y = W_val - y_val
+                    new_y_val = original_offset_y
+                    is_y_negative = True
+                elif dist_to_top < tolerance:
+                    original_offset_y = y_val
+                    new_y_val = original_offset_y
+                    is_y_negative = False
+                else:
+                    original_offset_y = 0.0
+                    new_y_val = y_val
+        except:
+            original_offset_y = 0.0
+            new_y_val = y_val
+
+        # --- Вычисляем новые координаты ---
+        if axis == 'x':
+            if is_x_negative:
+                new_x = str(round(new_x_val, 1))  # Было L - 100 → станет 100
+            else:
+                new_x = f"-{round(new_x_val, 1)}"  # Было 100 → станет -100
+            new_y = y_str
+        else:  # axis == 'y'
+            if is_y_negative:
+                new_y = str(round(new_y_val, 1))  # Было -78 → станет 78
+            else:
+                new_y = f"-{round(new_y_val, 1)}"  # Было 78 → станет -78
+            new_x = x_str
+
+        # 🔥 Сохраняем состояние перед изменением
+        self.main_window.save_state("Отражение отверстия")
+
+        # --- Применяем изменение ---
+        if mode == 'copy':
+            new_op = {
+                "TypeName": op["TypeName"],
+                "X1": new_x,
+                "Y1": new_y,
+                "Diameter": op.get("Diameter", "5"),
+                "Depth": op.get("Depth", "16")
+            }
+            self.main_window.cad_operations.append(new_op)
+        else:  # move
+            op["X1"] = new_x
+            op["Y1"] = new_y
+
+        #self.main_window.refresh_plot()
+
+
+
+        self.main_window.refresh_plot()
 
 class EditorWindow(QMainWindow):
 
