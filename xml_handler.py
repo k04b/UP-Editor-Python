@@ -164,7 +164,7 @@ def load_xml(file_path):
                 op["Vertexes"] = vertexes
 
         # --- Остальные типы ---
-        elif type_name in ["Vertical Hole", "Back Vertical Hole", "Horizontal Hole", "Line"]:
+        elif type_name in ["Vertical Hole", "Back Vertical Hole", "Horizontal Hole", "Line", "Vertical Line"]:
             pass  # уже заполнено
         else:
             continue  # пропускаем неизвестные
@@ -214,17 +214,22 @@ def save_xml(file_path, panel_data, operations):
         cad = ET.SubElement(root, "CAD")
         type_name = op.get("TypeName", "")
 
-        # === TypeNo и TypeName ===
-        type_no_map = {
-            "Vertical Hole": "1",
-            "Back Vertical Hole": "8",
-            "Horizontal Hole": "2",
-            "Line": "3",
-            "Path": "7"
-        }
-        type_no = type_no_map.get(type_name, "1")
+        # TypeNo
+                # === TypeNo по точному соответствию ===
+        if type_name == "Vertical Hole":
+            type_no = "1"
+        elif type_name == "Back Vertical Hole":
+            type_no = "8"
+        elif type_name == "Horizontal Hole":
+            type_no = "2"
+        elif type_name in ["Line", "Vertical Line"]:
+            type_no = "3"
+        elif type_name == "Path":
+            type_no = "7"
+        else:
+            type_no = "1"  # По умолчанию
         ET.SubElement(cad, "TypeNo").text = type_no
-        ET.SubElement(cad, "TypeName").text = type_name  # ⬅️ Обязательно добавляем!
+        ET.SubElement(cad, "TypeName").text = type_name
 
         if type_name == "Path":
             # Настройки
@@ -263,6 +268,19 @@ def save_xml(file_path, panel_data, operations):
                 val = op.get(key, "")
                 if val:
                     ET.SubElement(cad, key).text = format_num(val)
+
+        elif type_name == "Vertical Line":
+            for key in ["BeginX", "BeginY", "EndX", "EndY", "Width", "Depth"]:
+                val = op.get(key, "")
+                if val:
+                    ET.SubElement(cad, key).text = format_num(val)
+            ET.SubElement(cad, "Correction").text = op.get("Correction", "1")
+            ET.SubElement(cad, "CorrectionExtra").text = op.get("CorrectionExtra", "0")
+            ET.SubElement(cad, "Enable").text = op.get("Enable", "1")
+            ET.SubElement(cad, "UseSaw").text = op.get("UseSaw", "1")
+            ET.SubElement(cad, "UseDZ").text = op.get("UseDZ", "0")
+            ET.SubElement(cad, "BeginZ").text = op.get("BeginZ", "0.00")
+            ET.SubElement(cad, "EndZ").text = op.get("EndZ", "0.00")        
 
         else:
             # Отверстия
