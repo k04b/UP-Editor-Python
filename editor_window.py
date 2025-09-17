@@ -90,7 +90,8 @@ def display_type(type_name):
         "Back Vertical Hole": "Нижняя плоскость",
         "Horizontal Hole": "Торцевое",
         "Line": "Линейная фрезеровка",
-        "Path": "Путь фрезеровки"
+        "Path": "Путь фрезеровки",
+        "Vertical Line": "Фрезеровка пилой"  # ← Добавлено
     }.get(type_name, type_name)
 
 
@@ -100,7 +101,8 @@ def internal_type(display_name):
         "Нижняя плоскость": "Back Vertical Hole",
         "Торцевое": "Horizontal Hole",
         "Линейная фрезеровка": "Line",
-        "Путь фрезеровки": "Path"
+        "Путь фрезеровки": "Path",
+        "Фрезеровка пилой": "Vertical Line"  # ← Добавлено
     }.get(display_name, display_name)
 # ---------------------------
 
@@ -247,6 +249,35 @@ class PlotWidget(FigureCanvas):
                     line, = self.ax.plot([begin_x, end_x], [begin_y, end_y], color='brown', linewidth=2, zorder=2)
                     self.operation_patches.append((line, idx))
                     types_in_use.add(("Фрезеровка", 'brown'))
+
+                elif type_name == "Vertical Line":
+                    try:
+                        x1_str = op.get("BeginX", "0").strip()
+                        y1_str = op.get("BeginY", "0").strip()
+                        x2_str = op.get("EndX", "0").strip()
+                        y2_str = op.get("EndY", "0").strip()
+
+                        # Проверяем, не пустые ли строки
+                        if not x1_str or not y1_str or not x2_str or not y2_str:
+                            print(f"⚠️ Vertical Line: пропущена операция — пустые координаты: {op}")
+                            continue
+
+                        # Вычисляем координаты
+                        begin_x = evaluate_expression(x1_str, L_val, W_val)
+                        begin_y = evaluate_expression(y1_str, L_val, W_val)
+                        end_x = evaluate_expression(x2_str, L_val, W_val)
+                        end_y = evaluate_expression(y2_str, L_val, W_val)
+
+                        # Рисуем линию
+                        line, = self.ax.plot([begin_x, end_x], [begin_y, end_y],
+                                             color='red', linewidth=2, linestyle='-', zorder=2)
+                        self.operation_patches.append((line, idx))
+                        types_in_use.add(("Фрезеровка пилой", 'red'))
+
+                    except Exception as e:
+                        print(f"❌ Ошибка при отрисовке Vertical Line: {e}")
+                        print(f"Данные операции: {op}")
+                        continue    
 
                 elif type_name == "Path":
                     vertexes = op.get("Vertexes", [])
@@ -636,6 +667,115 @@ class PlotWidget(FigureCanvas):
 
 class EditorWindow(QMainWindow):
 
+    def edit_saw_line_dialog(self, idx=-1):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Редактировать фрезеровку пилой" if idx >= 0 else "Фрезеровка пилой")
+        dialog.resize(450, 350)
+        layout = QVBoxLayout()
+
+        x1_input = QLineEdit("0")
+        y1_input = QLineEdit("0")
+        x2_input = QLineEdit("100")
+        y2_input = QLineEdit("100")
+        width_input = QLineEdit("4")
+        depth_input = QLineEdit("7")
+
+        form_layout = QVBoxLayout()
+        form_layout.addWidget(QLabel("Начало (X1, Y1):"))
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("X1:")); row1.addWidget(x1_input)
+        row1.addWidget(QLabel("Y1:")); row1.addWidget(y1_input)
+        form_layout.addLayout(row1)
+
+        form_layout.addWidget(QLabel("Конец (X2, Y2):"))
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("X2:")); row2.addWidget(x2_input)
+        row2.addWidget(QLabel("Y2:")); row2.addWidget(y2_input)
+        form_layout.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("Ширина пропила:")); row3.addWidget(width_input)
+        row3.addWidget(QLabel("Глубина:")); row3.addWidget(depth_input)
+        form_layout.addLayout(row3)
+
+        layout.addLayout(form_layout)
+
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Сохранить")
+        delete_btn = QPushButton("Удалить")
+        cancel_btn = QPushButton("Отмена")
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(delete_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.setLayout(layout)
+
+        if idx >= 0:
+            op = self.cad_operations[idx]
+            x1_input.setText(op.get("BeginX", "0"))
+            y1_input.setText(op.get("BeginY", "0"))
+            x2_input.setText(op.get("EndX", "100"))
+            y2_input.setText(op.get("EndY", "100"))
+            width_input.setText(op.get("Width", "4"))
+            depth_input.setText(op.get("Depth", "7"))
+            delete_btn.setVisible(True)
+        else:
+            delete_btn.setVisible(False)
+
+        def save():
+            try:
+                x1 = x1_input.text().strip()
+                y1 = y1_input.text().strip()
+                x2 = x2_input.text().strip()
+                y2 = y2_input.text().strip()
+                w = width_input.text().strip()
+                d = depth_input.text().strip()
+
+                float(x1); float(y1); float(x2); float(y2); float(w); float(d)
+
+                new_op = {
+                    "TypeName": "Vertical Line",
+                    "BeginX": x1, "BeginY": y1,
+                    "EndX": x2, "EndY": y2,
+                    "Width": w,
+                    "Depth": d,
+                    "Correction": "1",
+                    "CorrectionExtra": "0",
+                    "Enable": "1",
+                    "UseSaw": "1",
+                    "UseDZ": "0",
+                    "BeginZ": "0.00",
+                    "EndZ": "0.00"
+                }
+
+                self.save_state("Фрезеровка пилой")
+                if idx == -1:
+                    self.cad_operations.append(new_op)
+                else:
+                    self.cad_operations[idx] = new_op
+
+                self.refresh_plot()
+                dialog.accept()
+
+            except ValueError:
+                QMessageBox.critical(dialog, "Ошибка", "Введите корректные числовые значения!")
+
+        def delete():
+            if idx >= 0:
+                reply = QMessageBox.question(dialog, "Удалить?", "Удалить эту фрезеровку пилой?",
+                                            QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self.save_state("Удаление фрезеровки пилой")
+                    del self.cad_operations[idx]
+                    self.refresh_plot()
+                    dialog.accept()
+
+        save_btn.clicked.connect(save)
+        delete_btn.clicked.connect(delete)
+        cancel_btn.clicked.connect(dialog.reject)
+        dialog.exec_()
+
 
     
     def __init__(self):
@@ -796,6 +936,7 @@ class EditorWindow(QMainWindow):
         add_mill_menu = menu_bar.addMenu("Добавить фрезеровку")
         action_path = add_mill_menu.addAction("Путь фрезеровки")
         action_line = add_mill_menu.addAction("Линейная фрезеровка")
+        action_saw = add_mill_menu.addAction("Фрезеровка пилой")
 
         # Меню "Параметры детали"
         panel_menu = menu_bar.addMenu("Параметры детали")
@@ -808,9 +949,12 @@ class EditorWindow(QMainWindow):
         action_top.triggered.connect(lambda: self.add_hole("Vertical Hole"))
         action_back.triggered.connect(lambda: self.add_hole("Back Vertical Hole"))
         action_horizontal.triggered.connect(lambda: self.add_hole("Horizontal Hole"))
+        
+        
 
         action_path.triggered.connect(lambda: self.edit_path_dialog(-1))
         action_line.triggered.connect(lambda: self.edit_line_dialog(-1))
+        action_saw.triggered.connect(lambda: self.edit_saw_line_dialog(-1))
 
         action_edit_panel.triggered.connect(self.edit_panel_properties)
 
@@ -1077,10 +1221,6 @@ class EditorWindow(QMainWindow):
 
 
     def edit_operation(self, idx):
-        """
-        Диалог редактирования отверстия.
-        Для "Торцевое" — строгая проверка: только на торце.
-        """
         if idx >= 0:
             op = self.cad_operations[idx]
             if op["TypeName"] == "Path":
@@ -1088,6 +1228,9 @@ class EditorWindow(QMainWindow):
                 return
             elif op["TypeName"] == "Line":
                 self.edit_line_dialog(idx)
+                return
+            elif op["TypeName"] == "Vertical Line":
+                self.edit_saw_line_dialog(idx)
                 return
 
         dialog = QDialog(self)
