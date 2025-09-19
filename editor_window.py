@@ -3,7 +3,7 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QComboBox,
-    QFileDialog, QMessageBox, QDialog, QFormLayout, QTableWidget, QTableWidgetItem
+    QFileDialog, QMessageBox, QDialog, QFormLayout, QCheckBox,  QTableWidget, QTableWidgetItem
 )
 from PyQt5.QtCore import Qt
 import xml_handler
@@ -520,23 +520,26 @@ class PlotWidget(FigureCanvas):
 
     def mirror_operation(self, idx, axis):
         op = self.main_window.cad_operations[idx]
+        type_name = op["TypeName"]
+
         try:
             L_val = float(evaluate_expression(str(self.main_window.panel_data.get("PanelLength", 0)), 0, 0))
         except:
-            L_val = 0.0
+            L_val = 1000.0
         try:
             W_val = float(evaluate_expression(str(self.main_window.panel_data.get("PanelWidth", 0)), 0, 0))
         except:
-            W_val = 0.0
+            W_val = 600.0
 
+        # Диалог: копировать или переместить?
         dialog = QDialog(self.main_window)
-        dialog.setWindowTitle("Отразить с копированием?")
+        dialog.setWindowTitle(f"Отразить по {axis.upper()}?")
         dialog.resize(300, 150)
         layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"Отразить по {axis.upper()} с копированием?"))
+        layout.addWidget(QLabel(f"Отразить по оси {axis.upper()} с копированием?"))
         btn_layout = QHBoxLayout()
-        yes_btn = QPushButton("Да")
-        no_btn = QPushButton("Нет")
+        yes_btn = QPushButton("Да (копировать)")
+        no_btn = QPushButton("Нет (переместить)")
         btn_layout.addWidget(yes_btn)
         btn_layout.addWidget(no_btn)
         layout.addLayout(btn_layout)
@@ -562,106 +565,69 @@ class PlotWidget(FigureCanvas):
         x_str = op.get("X1", "0").strip()
         y_str = op.get("Y1", "0").strip()
 
-        # --- Обработка X ---
         try:
             x_val = evaluate_expression(x_str, L_val, W_val)
-        except:
-            x_val = 0.0
-
-        # Определяем, является ли X отрицательным (L - ...)
-        is_x_negative = False
-        try:
-            if isinstance(x_str, str) and x_str.startswith('-') and x_str[1:].replace('.', '', 1).isdigit():
-                offset = float(x_str[1:])
-                original_offset = offset
-                new_x_val = offset  # Расстояние от левого края
-                is_x_negative = True
-            else:
-                # Положительное или формула: определяем расстояние до ближайшего края
-                dist_to_left = abs(x_val - L_val)
-                dist_to_right = abs(x_val)
-                tolerance = 1.0
-                if dist_to_left < tolerance:
-                    original_offset = L_val - x_val
-                    new_x_val = original_offset
-                    is_x_negative = True
-                elif dist_to_right < tolerance:
-                    original_offset = x_val
-                    new_x_val = original_offset
-                    is_x_negative = False
-                else:
-                    original_offset = 0.0
-                    new_x_val = x_val
-        except:
-            original_offset = 0.0
-            new_x_val = x_val
-
-        # --- Обработка Y ---
-        try:
             y_val = evaluate_expression(y_str, L_val, W_val)
         except:
+            x_val = 0.0
             y_val = 0.0
 
-        is_y_negative = False
-        try:
-            if isinstance(y_str, str) and y_str.startswith('-') and y_str[1:].replace('.', '', 1).isdigit():
-                offset = float(y_str[1:])
-                original_offset_y = offset
-                new_y_val = offset
-                is_y_negative = True
-            else:
-                dist_to_top = abs(y_val)
-                dist_to_bottom = abs(y_val - W_val)
-                tolerance = 1.0
-                if dist_to_bottom < tolerance:
-                    original_offset_y = W_val - y_val
-                    new_y_val = original_offset_y
-                    is_y_negative = True
-                elif dist_to_top < tolerance:
-                    original_offset_y = y_val
-                    new_y_val = original_offset_y
-                    is_y_negative = False
+        # === Вычисляем новые координаты ===
+        if type_name == "Horizontal Hole":
+            if axis == 'x':
+                # Отражение по X: всегда меняем X, независимо от текущего торца
+                new_x_val = L_val - x_val
+                # Определяем новое значение X как формулу
+                if abs(new_x_val) < 0.1:
+                    new_x = "0"
+                elif abs(new_x_val - L_val) < 0.1:
+                    new_x = "L"
                 else:
-                    original_offset_y = 0.0
-                    new_y_val = y_val
-        except:
-            original_offset_y = 0.0
-            new_y_val = y_val
+                    offset = round(L_val - new_x_val, 1)
+                    new_x = f"L-{offset}" if abs(offset) > 0.1 else "L"
+                new_y = y_str
+            else:  # axis == 'y'
+                # Отражение по Y
+                if abs(y_val) < 0.1:  # было на верхнем
+                    new_y = "W"
+                elif abs(y_val - W_val) < 0.1:  # было на нижнем
+                    new_y = "0"
+                else:
+                    offset = round(W_val - y_val, 1)
+                    new_y = f"W-{offset}" if abs(offset) > 0.1 else "W"
+                new_x = x_str
+        else:
+            # Для вертикальных отверстий: простое отражение внутри
+            if axis == 'x':
+                new_x_val = L_val - x_val
+                new_x = str(round(new_x_val, 1)) if abs(new_x_val) > 0.1 else "0"
+                new_y = y_str
+            else:  # axis == 'y'
+                new_y_val = W_val - y_val
+                new_y = str(round(new_y_val, 1)) if abs(new_y_val) > 0.1 else "0"
+                new_x = x_str
 
-        # --- Вычисляем новые координаты ---
-        if axis == 'x':
-            if is_x_negative:
-                new_x = str(round(new_x_val, 1))  # Было L - 100 → станет 100
-            else:
-                new_x = f"-{round(new_x_val, 1)}"  # Было 100 → станет -100
-            new_y = y_str
-        else:  # axis == 'y'
-            if is_y_negative:
-                new_y = str(round(new_y_val, 1))  # Было -78 → станет 78
-            else:
-                new_y = f"-{round(new_y_val, 1)}"  # Было 78 → станет -78
-            new_x = x_str
-
-        # 🔥 Сохраняем состояние перед изменением
+        # 🔥 Сохраняем состояние ДО изменений
         self.main_window.save_state("Отражение отверстия")
 
-        # --- Применяем изменение ---
+        # --- Применяем ---
         if mode == 'copy':
             new_op = {
                 "TypeName": op["TypeName"],
                 "X1": new_x,
                 "Y1": new_y,
                 "Diameter": op.get("Diameter", "5"),
-                "Depth": op.get("Depth", "16")
+                "Depth": op.get("Depth", "16"),
+                "HoleType": op.get("HoleType", "0"),
+                "Enable": op.get("Enable", "1")
             }
+            # Z1 только для торцевых
+            if op["TypeName"] == "Horizontal Hole":
+                new_op["Z1"] = op.get("Z1", "8.00")
             self.main_window.cad_operations.append(new_op)
         else:  # move
             op["X1"] = new_x
             op["Y1"] = new_y
-
-        #self.main_window.refresh_plot()
-
-
 
         self.main_window.refresh_plot()
 
@@ -670,7 +636,7 @@ class EditorWindow(QMainWindow):
     def edit_saw_line_dialog(self, idx=-1):
         dialog = QDialog(self)
         dialog.setWindowTitle("Редактировать фрезеровку пилой" if idx >= 0 else "Фрезеровка пилой")
-        dialog.resize(450, 350)
+        dialog.resize(450, 380)
         layout = QVBoxLayout()
 
         x1_input = QLineEdit("0")
@@ -679,6 +645,10 @@ class EditorWindow(QMainWindow):
         y2_input = QLineEdit("100")
         width_input = QLineEdit("4")
         depth_input = QLineEdit("7")
+
+        # --- Чекбокс: использовать пилу ---
+        use_saw_checkbox = QCheckBox("Использовать циркулярную пилу (UseSaw)")
+        use_saw_checkbox.setChecked(True)  # По умолчанию — пила
 
         form_layout = QVBoxLayout()
         form_layout.addWidget(QLabel("Начало (X1, Y1):"))
@@ -698,6 +668,7 @@ class EditorWindow(QMainWindow):
         row3.addWidget(QLabel("Глубина:")); row3.addWidget(depth_input)
         form_layout.addLayout(row3)
 
+        form_layout.addWidget(use_saw_checkbox)  # ← Добавляем чекбокс
         layout.addLayout(form_layout)
 
         btn_layout = QHBoxLayout()
@@ -711,6 +682,7 @@ class EditorWindow(QMainWindow):
 
         dialog.setLayout(layout)
 
+        # --- Заполнение при редактировании ---
         if idx >= 0:
             op = self.cad_operations[idx]
             x1_input.setText(op.get("BeginX", "0"))
@@ -719,6 +691,11 @@ class EditorWindow(QMainWindow):
             y2_input.setText(op.get("EndY", "100"))
             width_input.setText(op.get("Width", "4"))
             depth_input.setText(op.get("Depth", "7"))
+
+            # Устанавливаем состояние чекбокса
+            use_saw = op.get("UseSaw", "0").strip()
+            use_saw_checkbox.setChecked(use_saw == "1")
+
             delete_btn.setVisible(True)
         else:
             delete_btn.setVisible(False)
@@ -734,16 +711,19 @@ class EditorWindow(QMainWindow):
 
                 float(x1); float(y1); float(x2); float(y2); float(w); float(d)
 
+                # Собираем операцию
                 new_op = {
                     "TypeName": "Vertical Line",
-                    "BeginX": x1, "BeginY": y1,
-                    "EndX": x2, "EndY": y2,
+                    "BeginX": x1,
+                    "BeginY": y1,
+                    "EndX": x2,
+                    "EndY": y2,
                     "Width": w,
                     "Depth": d,
                     "Correction": "1",
                     "CorrectionExtra": "0",
                     "Enable": "1",
-                    "UseSaw": "1",
+                    "UseSaw": "1" if use_saw_checkbox.isChecked() else "0",  # ← Здесь!
                     "UseDZ": "0",
                     "BeginZ": "0.00",
                     "EndZ": "0.00"

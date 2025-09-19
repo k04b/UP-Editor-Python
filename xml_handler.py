@@ -149,7 +149,6 @@ def load_xml(file_path):
                         vertexes.append(vertex)
 
             if len(vertexes) > 0:
-                # Копируем настройки пути
                 settings = {
                     "Width": op.get("Width", "8"),
                     "Depth": op.get("Depth", "17"),
@@ -165,9 +164,9 @@ def load_xml(file_path):
 
         # --- Остальные типы ---
         elif type_name in ["Vertical Hole", "Back Vertical Hole", "Horizontal Hole", "Line", "Vertical Line"]:
-            pass  # уже заполнено
+            pass
         else:
-            continue  # пропускаем неизвестные
+            continue
 
         operations.append(op)
 
@@ -175,70 +174,137 @@ def load_xml(file_path):
 
 
 def save_xml(file_path, panel_data, operations):
-    """
-    Сохраняет данные в точном формате станка.
-    - KDTPanelFormat
-    - Vertexes → Point/Line/Arc
-    - Без Z1 для Vertical Hole, Back Vertical Hole, Line
-    - Числа без лишних .00
-    """
+    import xml.etree.ElementTree as ET
+    from xml.dom import minidom
+
     root = ET.Element("KDTPanelFormat")
 
-    # === Блок PANEL ===
+    # === PANEL ===
     panel = ET.SubElement(root, "PANEL")
-    ET.SubElement(panel, "CoordinateSystem").text = panel_data.get("CoordinateSystem", "3")
-    ET.SubElement(panel, "PanelLength").text = format_num(panel_data.get("PanelLength", "0"))
-    ET.SubElement(panel, "PanelWidth").text = format_num(panel_data.get("PanelWidth", "0"))
-    ET.SubElement(panel, "PanelThickness").text = format_num(panel_data.get("PanelThickness", "0"))
-
-    ET.SubElement(panel, "PanelName").text = panel_data.get("PanelName", "") or None
-    ET.SubElement(panel, "PanelOrderName").text = panel_data.get("PanelOrderName", "") or None
-    ET.SubElement(panel, "PanelMaterial").text = panel_data.get("PanelMaterial", "") or None
-    ET.SubElement(panel, "PanelTexture").text = panel_data.get("PanelTexture", "0")
-    ET.SubElement(panel, "PanelQuantity").text = panel_data.get("PanelQuantity", "1")
-    ET.SubElement(panel, "Inch").text = panel_data.get("Inch", "0")
+    for key in ["CoordinateSystem", "PanelLength", "PanelWidth", "PanelThickness",
+                "PanelName", "PanelOrderName", "PanelMaterial", "PanelTexture",
+                "PanelQuantity", "Inch"]:
+        val = panel_data.get(key, "")
+        if val:
+            elem = ET.SubElement(panel, key)
+            elem.text = format_num(str(val))
 
     # === Params ===
     params = ET.SubElement(panel, "Params")
-    L_val = format_num(panel_data.get("PanelLength", "0"))
-    W_val = format_num(panel_data.get("PanelWidth", "0"))
-    T_val = format_num(panel_data.get("PanelThickness", "0"))
+    try:
+        L_size = float(evaluate_expression(str(panel_data.get("PanelLength", 0)), 0, 0))
+        W_size = float(evaluate_expression(str(panel_data.get("PanelWidth", 0)), 0, 0))
+        T_size = float(evaluate_expression(str(panel_data.get("PanelThickness", 0)), 0, 0))
+    except:
+        L_size = 1000.0
+        W_size = 600.0
+        T_size = 18.0
 
-    add_param(params, "Длина детали", "L", L_val)
-    add_param(params, "Ширина детали", "W", W_val)
-    add_param(params, "Толщина детали", "T", T_val)
+    add_param(params, "Длина детали", "L", format_num(L_size))
+    add_param(params, "Ширина детали", "W", format_num(W_size))
+    add_param(params, "Толщина детали", "T", format_num(T_size))
 
+    # === Фильтрация операций перед сохранением ===
+    # === Фильтрация операций перед сохранением ===
+    valid_operations = []
+    removed_count = 0
+    tolerance = 0.1
 
-    # === Операции CAD ===
+    try:
+        L_size = float(evaluate_expression(str(panel_data.get("PanelLength", 0)), 0, 0))
+        W_size = float(evaluate_expression(str(panel_data.get("PanelWidth", 0)), 0, 0))
+    except:
+        L_size = 1000.0
+        W_size = 600.0
+
+    print(f"razmery detali: L={L_size}, W={W_size}")
+
     for op in operations:
+        type_name = op.get("TypeName", "")
+        is_valid = True
+
+        if type_name == "Horizontal Hole":
+            x_str = op.get("X1", "0").strip()
+            y_str = op.get("Y1", "0").strip()
+
+            if not x_str or not y_str:
+                is_valid = False
+            else:
+                try:
+                    x_val = evaluate_expression(x_str, L_size, W_size)
+                    y_val = evaluate_expression(y_str, L_size, W_size)
+                except:
+                    is_valid = False
+                else:
+                    # Условие 1: X должен быть в пределах [0, L]
+                    if not (0 <= x_val <= L_size):
+                        print(f"[save_xml] Horizontal Hole: X={x_val:.1f} вне [0, {L_size}]  удалено")
+                        is_valid = False
+                    # Условие 2: Y должен быть в пределах [0, W]
+                    elif not (0 <= y_val <= W_size):
+                        print(f"[save_xml] Horizontal Hole: Y={y_val:.1f} вне [0, {W_size}] удалено")
+                        is_valid = False
+                    # Условие 3: должно быть на одном из торцов
+                    else:
+                        on_edge = (
+                            abs(x_val) < tolerance or           # X ≈ 0
+                            abs(x_val - L_size) < tolerance or   # X ≈ L
+                            abs(y_val) < tolerance or           # Y ≈ 0
+                            abs(y_val - W_size) < tolerance      # Y ≈ W
+                        )
+                        if not on_edge:
+                            print(f"[save_xml] Horizontal Hole не на торце: X={x_val:.1f}, Y={y_val:.1f} удалено")
+                            is_valid = False
+
+        elif type_name in ["Vertical Hole", "Back Vertical Hole"]:
+            x_str = op.get("X1", "0").strip()
+            y_str = op.get("Y1", "0").strip()
+            try:
+                x_val = evaluate_expression(x_str, L_size, W_size)
+                y_val = evaluate_expression(y_str, L_size, W_size)
+            except:
+                is_valid = False
+            else:
+                if not (0 <= x_val <= L_size and 0 <= y_val <= W_size):
+                    print(f"[save_xml] vnutrennee: X={x_val:.1f}, Y={y_val:.1f} deleted")
+                    is_valid = False
+
+        # Все остальные типы — всегда валидны
+        if is_valid:
+            valid_operations.append(op)
+        else:
+            removed_count += 1
+
+    if removed_count > 0:
+        print(f"[save_xml] deleted {removed_count} bad hole")
+
+    # === Сохраняем только валидные операции ===
+    for op in valid_operations:
         cad = ET.SubElement(root, "CAD")
         type_name = op.get("TypeName", "")
 
         # TypeNo
-                # === TypeNo по точному соответствию ===
         if type_name == "Vertical Hole":
-            type_no = "1"
+            ET.SubElement(cad, "TypeNo").text = "1"
         elif type_name == "Back Vertical Hole":
-            type_no = "8"
+            ET.SubElement(cad, "TypeNo").text = "8"
         elif type_name == "Horizontal Hole":
-            type_no = "2"
+            ET.SubElement(cad, "TypeNo").text = "2"
         elif type_name in ["Line", "Vertical Line"]:
-            type_no = "3"
+            ET.SubElement(cad, "TypeNo").text = "3"
         elif type_name == "Path":
-            type_no = "7"
+            ET.SubElement(cad, "TypeNo").text = "7"
         else:
-            type_no = "1"  # По умолчанию
-        ET.SubElement(cad, "TypeNo").text = type_no
+            ET.SubElement(cad, "TypeNo").text = "1"
+
         ET.SubElement(cad, "TypeName").text = type_name
 
+        # --- Path ---
         if type_name == "Path":
-            # Настройки
             for key in ["Width", "Depth", "Correction", "CorrectionExtra", "Close", "Empty", "Relative", "Enable"]:
                 val = op.get(key, "")
                 if val:
                     ET.SubElement(cad, key).text = format_num(val)
-
-            # Вершины
             vertexes_elem = ET.SubElement(cad, "Vertexes")
             for v in op.get("Vertexes", []):
                 v_type = v["type"]
@@ -263,12 +329,14 @@ def save_xml(file_path, panel_data, operations):
                     ET.SubElement(el, "Radius").text = format_num(v["Radius"])
                     ET.SubElement(el, "Direction").text = v["Direction"]
 
+        # --- Line ---
         elif type_name == "Line":
             for key in ["BeginX", "BeginY", "EndX", "EndY", "Width", "Depth", "Correction", "Direction", "Enable"]:
                 val = op.get(key, "")
                 if val:
                     ET.SubElement(cad, key).text = format_num(val)
 
+        # --- Vertical Line ---
         elif type_name == "Vertical Line":
             for key in ["BeginX", "BeginY", "EndX", "EndY", "Width", "Depth"]:
                 val = op.get(key, "")
@@ -280,10 +348,10 @@ def save_xml(file_path, panel_data, operations):
             ET.SubElement(cad, "UseSaw").text = op.get("UseSaw", "1")
             ET.SubElement(cad, "UseDZ").text = op.get("UseDZ", "0")
             ET.SubElement(cad, "BeginZ").text = op.get("BeginZ", "0.00")
-            ET.SubElement(cad, "EndZ").text = op.get("EndZ", "0.00")        
+            ET.SubElement(cad, "EndZ").text = op.get("EndZ", "0.00")
 
+        # --- Отверстия ---
         else:
-            # Отверстия
             x1 = format_num(op.get("X1", "0"))
             y1 = format_num(op.get("Y1", "0"))
             depth = format_num(op.get("Depth", "0"))
@@ -300,23 +368,20 @@ def save_xml(file_path, panel_data, operations):
                 ET.SubElement(cad, "Z1").text = z1
 
                 try:
-                    L_val_num = float(evaluate_expression(str(panel_data.get("PanelLength", 0)), 0, 0))
-                    W_val_num = float(evaluate_expression(str(panel_data.get("PanelWidth", 0)), 0, 0))
-                    x_val = evaluate_expression(x1, L_val_num, W_val_num)
-                    y_val = evaluate_expression(y1, L_val_num, W_val_num)
+                    x_val = evaluate_expression(x1, L_size, W_size)
+                    y_val = evaluate_expression(y1, L_size, W_size)
                 except:
                     x_val = 0.0
                     y_val = 0.0
 
-                tolerance = 0.1
                 quadrant = 0
                 if abs(x_val) < tolerance:
                     quadrant = 2
-                elif abs(x_val - L_val_num) < tolerance:
+                elif abs(x_val - L_size) < tolerance:
                     quadrant = 1
                 elif abs(y_val) < tolerance:
                     quadrant = 4
-                elif abs(y_val - W_val_num) < tolerance:
+                elif abs(y_val - W_size) < tolerance:
                     quadrant = 3
 
                 if quadrant != 0:
@@ -326,11 +391,22 @@ def save_xml(file_path, panel_data, operations):
             ET.SubElement(cad, "Diameter").text = diameter
             ET.SubElement(cad, "Enable").text = enable
 
-    # Форматированный вывод
-    rough_string = ET.tostring(root, 'utf-8')
-    reparsed = minidom.parseString(rough_string)
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(reparsed.toprettyxml(indent="  "))
+    # === Запись в файл ===
+    try:
+        rough_string = ET.tostring(root, 'utf-8')
+        reparsed = minidom.parseString(rough_string)
+        xml_str = reparsed.toprettyxml(indent="  ")
+        lines = [line for line in xml_str.split('\n') if line.strip()]
+        clean_xml = '\n'.join(lines)
+
+        with open(file_path, "w", encoding="utf-8", errors='replace', newline='') as f:
+            f.write(clean_xml)
+
+        print(f"Файл успешно сохранён: {file_path}")
+
+    except Exception as e:
+        print(f"Ошибка при сохранении: {e}")
+        raise
 
 
 def add_param(parent, comment, key, value):
